@@ -37,7 +37,39 @@ const UPLOAD_BATCH_SIZE = 3; // Upload 3 files at a time (smaller batches for ba
 const PROCESS_BATCH_SIZE = 500; // Process 500 files at a time from ZIP
 
 
-// Face crop helper - uses backend InsightFace detector
+// School ID photo processing helper
+async function processSchoolIDPhoto(photoBlob: Blob): Promise<Blob | null> {
+  try {
+    const formData = new FormData();
+    formData.append('image', photoBlob);
+
+    const response = await fetch('http://localhost:3001/api/image/process-school-id', {
+      method: 'POST',
+      body: formData
+    });
+
+    if (!response.ok) {
+      const errorText = await response.text();
+      console.error(`[School ID] API error ${response.status}:`, errorText);
+      return null;
+    }
+
+    const result = await response.json();
+    if (!result.success) {
+      console.error(`[School ID] Processing failed:`, result.error);
+      return null;
+    }
+
+    // Convert data URL back to blob
+    const dataUrl = result.processedImageUrl;
+    const response2 = await fetch(dataUrl);
+    return await response2.blob();
+  } catch (err) {
+    console.error('[School ID] Error calling processor:', err);
+    return null;
+  }
+}
+
 export function PhotoMatchDialog({ projectId, records }: PhotoMatchDialogProps) {
   const [open, setOpen] = useState(false);
   const [isProcessing, setIsProcessing] = useState(false);
@@ -52,6 +84,7 @@ export function PhotoMatchDialog({ projectId, records }: PhotoMatchDialogProps) 
   const [fastMode, setFastMode] = useState(false);
   const [removeBackground, setRemoveBackground] = useState(false);
   const [autoCrop, setAutoCrop] = useState(false);
+  const [processAsSchoolID, setProcessAsSchoolID] = useState(false);
   const [cropWidth, setCropWidth] = useState(400);
   const [cropHeight, setCropHeight] = useState(400);
   const matchesRef = useRef<PhotoMatch[]>([]);
@@ -296,8 +329,47 @@ export function PhotoMatchDialog({ projectId, records }: PhotoMatchDialogProps) 
         }
       }
 
-      // Step 2: Upload photos to database
-      setProgress(removeBackground ? 50 : 0);
+      // Step 2: School ID processing if enabled
+      if (processAsSchoolID) {
+        try {
+          toast.loading(`Processing school ID photos for ${processedPhotos.length} images...`);
+          console.log(`[Upload SI] Starting school ID processing on ${processedPhotos.length} photos`);
+          
+          const siPromises = processedPhotos.map((photo) =>
+            processSchoolIDPhoto(photo.blob)
+              .then((processedBlob) => processedBlob || photo.blob)
+              .catch((err) => {
+                console.warn(`[Upload SI] School ID processing failed for ${photo.filename}, using original:`, err);
+                return photo.blob;
+              })
+          );
+
+          const siProcessedBlobs = await Promise.allSettled(siPromises);
+          
+          processedPhotos = processedPhotos.map((photo, index) => {
+            const result = siProcessedBlobs[index];
+            if (result.status === 'fulfilled' && result.value) {
+              return { ...photo, blob: result.value };
+            }
+            return photo;
+          });
+
+          const successCount = siProcessedBlobs.filter(r => r.status === 'fulfilled' && r.value).length;
+          toast.dismiss();
+          toast.success(`School ID processing applied to ${successCount}/${processedPhotos.length} images`);
+          console.log(`[Upload SI] SUCCESS: Processed ${successCount} photos`);
+          setProgress(75);
+        } catch (siError: any) {
+          console.error('[Upload SI] School ID processing error:', siError);
+          toast.dismiss();
+          const errorMsg = siError?.message || String(siError);
+          toast.error(`School ID processing failed: ${errorMsg}. Continuing with current images.`);
+          // Continue with current images
+        }
+      }
+
+      // Step 3: Upload photos to database
+      setProgress(removeBackground || processAsSchoolID ? 75 : 0);
       
       // Store photos in batches to avoid overloading the database
       for (let i = 0; i < processedPhotos.length; i += UPLOAD_BATCH_SIZE) {
@@ -311,9 +383,8 @@ export function PhotoMatchDialog({ projectId, records }: PhotoMatchDialogProps) 
             
             // Build processing status based on what was applied
             let processingStatus = 'processed';
-            if (removeBackground && faceCrop) processingStatus = 'bg_removed_face_cropped';
+            if (processAsSchoolID) processingStatus = 'school_id_processed';
             else if (removeBackground) processingStatus = 'bg_removed';
-            else if (faceCrop) processingStatus = 'face_cropped';
             
             formData.append('processing_status', processingStatus);
             formData.append('projectId', projectId);
@@ -468,6 +539,22 @@ export function PhotoMatchDialog({ projectId, records }: PhotoMatchDialogProps) 
                 id="auto-crop"
                 checked={autoCrop}
                 onCheckedChange={setAutoCrop}
+                disabled={isProcessing || isUploading}
+              />
+            </div>
+
+            {/* School ID Processing */}
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-2">
+                <ImagePlus className="h-4 w-4 text-blue-500" />
+                <Label htmlFor="school-id" className="text-sm">
+                  Process as School ID
+                </Label>
+              </div>
+              <Switch
+                id="school-id"
+                checked={processAsSchoolID}
+                onCheckedChange={setProcessAsSchoolID}
                 disabled={isProcessing || isUploading}
               />
             </div>

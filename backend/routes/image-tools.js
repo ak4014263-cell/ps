@@ -332,4 +332,102 @@ router.get('/face-crop-status', (req, res) => {
   });
 });
 
+/**
+ * POST /api/image/process-school-id
+ * Process image as school ID photo (background removal + face detection + alignment)
+ */
+router.post('/process-school-id', upload.single('image'), async (req, res) => {
+  try {
+    if (!req.file) {
+      return res.status(400).json({ success: false, error: 'No image uploaded' });
+    }
+
+    const inputPath = req.file.path;
+    const outputPath = path.join(PROCESSED_DIR, `school-id-${Date.now()}.png`);
+
+    console.log(`[School ID] Processing image: ${inputPath}`);
+
+    // Call Python school ID processor
+    const pythonProcess = spawn('python', [
+      path.join(__dirname, '..', '..', 'rembg-microservice', 'school_id_processor_cli.py'),
+      inputPath,
+      outputPath
+    ]);
+
+    let stdout = '';
+    let stderr = '';
+
+    pythonProcess.stdout.on('data', (data) => {
+      stdout += data.toString();
+      console.log(`[School ID] stdout:`, data.toString());
+    });
+
+    pythonProcess.stderr.on('data', (data) => {
+      stderr += data.toString();
+      console.error(`[School ID] stderr:`, data.toString());
+    });
+
+    pythonProcess.on('close', (code) => {
+      // Clean up input file
+      if (fs.existsSync(inputPath)) fs.unlinkSync(inputPath);
+
+      if (code !== 0) {
+        console.error(`[School ID] Python process exited with code ${code}`);
+        if (fs.existsSync(outputPath)) fs.unlinkSync(outputPath);
+        return res.status(500).json({
+          success: false,
+          error: `School ID processing failed: ${stderr || 'Unknown error'}`
+        });
+      }
+
+      // Check if output file was created
+      if (!fs.existsSync(outputPath)) {
+        return res.status(500).json({
+          success: false,
+          error: 'School ID processing failed: No output generated'
+        });
+      }
+
+      // Read the processed image
+      const imageBuffer = fs.readFileSync(outputPath);
+      const base64 = imageBuffer.toString('base64');
+      const dataUrl = `data:image/png;base64,${base64}`;
+
+      console.log(`[School ID] Successfully processed: ${outputPath}`);
+
+      // Clean up output file
+      if (fs.existsSync(outputPath)) fs.unlinkSync(outputPath);
+
+      res.json({
+        success: true,
+        processedImageUrl: dataUrl,
+        message: 'School ID photo processed successfully'
+      });
+    });
+
+    // Set timeout (30 seconds)
+    setTimeout(() => {
+      if (pythonProcess.exitCode === null) {
+        pythonProcess.kill();
+        if (fs.existsSync(inputPath)) fs.unlinkSync(inputPath);
+        if (fs.existsSync(outputPath)) fs.unlinkSync(outputPath);
+        res.status(500).json({
+          success: false,
+          error: 'School ID processing timeout'
+        });
+      }
+    }, 30000);
+
+  } catch (error) {
+    console.error('[School ID] Error:', error);
+    if (req.file && fs.existsSync(req.file.path)) {
+      fs.unlinkSync(req.file.path);
+    }
+    res.status(500).json({
+      success: false,
+      error: error.message
+    });
+  }
+});
+
 export default router;
