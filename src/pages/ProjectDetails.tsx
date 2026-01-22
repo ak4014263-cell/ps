@@ -806,12 +806,14 @@ export default function ProjectDetails() {
       let processed = 0;
       for (const record of recordsToProcess) {
         try {
-          // Build absolute URL - photos are stored in backend/uploads/photos/
+          // Build absolute URL - photos are stored in backend/uploads/project-photos/[projectId]/
           let photoUrl = record.photo_url!;
           if (!photoUrl.startsWith('http')) {
-            // If it's just a filename, prepend the uploads path
+            // If it's just a filename, prepend the project-specific uploads path
             if (!photoUrl.includes('/')) {
-              photoUrl = `/uploads/photos/${photoUrl}`;
+              // Photos are organized by project ID in backend storage
+              const projId = record.project_id || projectId;
+              photoUrl = `/uploads/project-photos/${projId}/${photoUrl}`;
             }
             // Ensure leading slash
             if (!photoUrl.startsWith('/')) {
@@ -820,7 +822,7 @@ export default function ProjectDetails() {
             photoUrl = `http://localhost:3001${photoUrl}`;
           }
           
-          console.log('[Face Crop] Fetching image from:', photoUrl, 'from database photo_url:', record.photo_url);
+          console.log('[Face Crop] Fetching image from:', photoUrl, 'Project ID:', record.project_id, 'Record photo_url:', record.photo_url);
           const imgRes = await fetch(photoUrl);
           if (!imgRes.ok) throw new Error(`Failed to fetch image (${imgRes.status})`);
           

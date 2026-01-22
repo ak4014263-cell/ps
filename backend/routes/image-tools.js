@@ -240,6 +240,17 @@ router.post('/save-photo', async (req, res) => {
       // Read file as binary data
       const fileBuffer = fs.readFileSync(req.file.path);
 
+      // Get project ID from record
+      const projectIdResults = await query('SELECT project_id FROM data_records WHERE id = ?', [recordId]);
+      if (!projectIdResults || projectIdResults.length === 0) {
+        throw new Error(`Record not found: ${recordId}`);
+      }
+      
+      const projectId = projectIdResults[0].project_id;
+      if (!projectId) {
+        throw new Error(`No project_id found for record ${recordId}`);
+      }
+
       // Determine which BLOB column and URL column to update based on photoType
       let blobColumn = 'photo_blob';
       let urlColumn = 'photo_url';
@@ -259,13 +270,13 @@ router.post('/save-photo', async (req, res) => {
       const sql = `UPDATE data_records SET ${blobColumn} = ?, ${urlColumn} = ? WHERE id = ?`;
       await execute(sql, [fileBuffer, photoFileName, recordId]);
 
-      console.log(`[Save Photo] Saved BLOB to ${blobColumn} and URL to ${urlColumn} (${photoFileName}) for record ${recordId}`);
+      console.log(`[Save Photo] Saved BLOB to ${blobColumn} and URL to ${urlColumn} (${photoFileName}) for record ${recordId}, project ${projectId}`);
 
       // Clean up temp file
       fs.unlinkSync(req.file.path);
 
-      // Return success with URL that matches our static file structure
-      const publicUrl = `/uploads/photos/${photoFileName}`;
+      // Return success with URL that matches our static file structure (project-specific directory)
+      const publicUrl = `/uploads/project-photos/${projectId}/${photoFileName}`;
       
       return res.json({ 
         success: true, 
