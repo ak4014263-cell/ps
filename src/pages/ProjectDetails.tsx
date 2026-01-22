@@ -802,12 +802,30 @@ export default function ProjectDetails() {
       let processed = 0;
       for (const record of recordsToProcess) {
         try {
-          const imgRes = await fetch(record.photo_url!);
+          // Build absolute URL if relative
+          let photoUrl = record.photo_url!;
+          if (!photoUrl.startsWith('http')) {
+            photoUrl = `http://localhost:3001${photoUrl}`;
+          }
+          
+          console.log('[Face Crop] Fetching image from:', photoUrl);
+          const imgRes = await fetch(photoUrl);
           if (!imgRes.ok) throw new Error(`Failed to fetch image (${imgRes.status})`);
+          
+          // Ensure we get image blob, not HTML
+          const contentType = imgRes.headers.get('content-type') || '';
+          if (!contentType.startsWith('image/')) {
+            throw new Error(`Invalid content type: ${contentType}. Expected image, got ${contentType}`);
+          }
+          
           const blob = await imgRes.blob();
+          if (!blob || blob.size === 0) throw new Error('Empty image blob');
+          
+          console.log('[Face Crop] Image blob received:', blob.type, blob.size);
 
           const formData = new FormData();
-          formData.append('image', blob);
+          // Explicitly set the correct mimetype
+          formData.append('image', blob, 'photo.jpg');
 
           const cropRes = await fetch('http://localhost:3001/api/image/face-crop', {
             method: 'POST',

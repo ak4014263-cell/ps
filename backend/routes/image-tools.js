@@ -33,10 +33,14 @@ const upload = multer({
   limits: { fileSize: 50 * 1024 * 1024 }, // 50MB limit
   fileFilter: (req, file, cb) => {
     console.log(`[Multer] File filter check: name=${file.originalname}, mimetype=${file.mimetype}`);
-    if (file.mimetype && (file.mimetype.startsWith('image/') || file.mimetype === 'application/octet-stream')) {
+    const mime = file.mimetype || '';
+    const isImage = mime.startsWith('image/') || mime === 'application/octet-stream';
+    const hasImageExt = /\.(jpg|jpeg|png|gif|webp|bmp)$/i.test(file.originalname);
+    
+    if (isImage || hasImageExt || !mime) {
       cb(null, true);
     } else {
-      cb(new Error(`File type not allowed: ${file.mimetype}`), false);
+      cb(new Error(`File type not allowed: ${mime}`), false);
     }
   }
 });
