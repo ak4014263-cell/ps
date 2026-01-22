@@ -332,18 +332,4 @@ router.get('/face-crop-status', (req, res) => {
   });
 });
 
-
-
-  } catch (error) {
-    console.error('[School ID] Error:', error);
-    if (req.file && fs.existsSync(req.file.path)) {
-      fs.unlinkSync(req.file.path);
-    }
-    res.status(500).json({
-      success: false,
-      error: error.message
-    });
-  }
-});
-
 export default router;

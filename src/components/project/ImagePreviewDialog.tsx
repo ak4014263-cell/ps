@@ -352,51 +352,8 @@ export function ImagePreviewDialog({
       console.log('[Face Crop] Starting with URL:', currentUrl);
       console.log('[Face Crop] Padding:', faceCropPadding, '% =', faceCropPadding / 100);
       
-      // Convert padding percentage to decimal (0-1 range)
-      const paddingDecimal = faceCropPadding / 100;
-
-      // Upload to backend (save-photo endpoint)
-      const saveFormData = new FormData();
-      const file = new File([croppedBlob], 'face_cropped.jpg', { type: 'image/jpeg' });
-      saveFormData.append('photo', file);
-      saveFormData.append('recordId', recordId);
-      saveFormData.append('photoType', 'face_cropped');
-
-      console.log('[Face Crop UI] Uploading cropped image...');
-
-      const saveResponse = await fetch('http://localhost:3001/api/image/save-photo', {
-        method: 'POST',
-        body: saveFormData,
-      });
-
-      if (!saveResponse.ok) {
-        const errorText = await saveResponse.text();
-        console.error('[Face Crop UI] Save response error:', errorText);
-        throw new Error(`Failed to save face cropped photo: ${saveResponse.status}`);
-      }
-
-      const saveData = await saveResponse.json();
-      if (!saveData.success) {
-        throw new Error(saveData.error || 'Failed to save photo');
-      }
-
-      const publicUrl = saveData.url;
-      const fullUrl = publicUrl.startsWith('http') ? publicUrl : `http://localhost:3001${publicUrl}`;
-      console.log('[Face Crop UI] Successfully saved to:', fullUrl);
-
-      // Display the saved image immediately
-      setProcessedUrl(fullUrl);
-
-      // Update database record via API
-      await apiService.dataRecordsAPI.update(recordId, {
-        photo_url: fullUrl,
-        face_cropped_url: fullUrl,
-        face_detected: true,
-        processing_status: 'face_cropped',
-      });
-
-      queryClient.invalidateQueries({ queryKey: ['project-records', projectId] });
-      toast.success('Face detected and cropped successfully!');
+      // Face crop processing has been removed
+      // This code path should not execute
     } catch (error: any) {
       console.error('Face crop failed:', error);
       console.error('Error details:', {
