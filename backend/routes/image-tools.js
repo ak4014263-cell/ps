@@ -240,29 +240,38 @@ router.post('/save-photo', async (req, res) => {
       // Read file as binary data
       const fileBuffer = fs.readFileSync(req.file.path);
 
-      // Determine which BLOB column to update based on photoType
+      // Determine which BLOB column and URL column to update based on photoType
       let blobColumn = 'photo_blob';
+      let urlColumn = 'photo_url';
+      let photoFileName = `photo_${recordId}_${Date.now()}.jpg`;
+
       if (photoType === 'face_cropped' || photoType === 'cropped_photo_url') {
         blobColumn = 'cropped_photo_blob';
+        urlColumn = 'cropped_photo_url';
+        photoFileName = `cropped_${recordId}_${Date.now()}.jpg`;
       } else if (photoType === 'original') {
         blobColumn = 'original_photo_blob';
+        urlColumn = 'original_photo_url';
+        photoFileName = `original_${recordId}_${Date.now()}.jpg`;
       }
 
-      // Save to MySQL BLOB column
-      const sql = `UPDATE data_records SET ${blobColumn} = ? WHERE id = ?`;
-      await execute(sql, [fileBuffer, recordId]);
+      // Save both BLOB (for database) and filename (for URL)
+      const sql = `UPDATE data_records SET ${blobColumn} = ?, ${urlColumn} = ? WHERE id = ?`;
+      await execute(sql, [fileBuffer, photoFileName, recordId]);
 
-      console.log(`[Save Photo] Saved to MySQL ${blobColumn} for record ${recordId}`);
+      console.log(`[Save Photo] Saved BLOB to ${blobColumn} and URL to ${urlColumn} (${photoFileName}) for record ${recordId}`);
 
       // Clean up temp file
       fs.unlinkSync(req.file.path);
 
-      // Return success with generic URL (image will be fetched via /api/image/get-photo endpoint)
-      const publicUrl = `/api/image/get-photo/${recordId}?type=${photoType}`;
+      // Return success with URL that matches our static file structure
+      const publicUrl = `/uploads/photos/${photoFileName}`;
       
       return res.json({ 
         success: true, 
         url: publicUrl,
+        photoUrl: publicUrl,
+        photoType: photoType,
         message: 'Photo saved to database'
       });
     } catch (error) {

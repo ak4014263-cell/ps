@@ -881,13 +881,16 @@ export default function ProjectDetails() {
           if (!saveData.success) throw new Error(saveData.error || 'Save failed');
 
           const publicUrl = saveData.url;
+          console.log('[Face Crop] Saved cropped photo, URL:', publicUrl);
 
+          // Update database with the new cropped photo URL and keep original
           await apiService.dataRecordsAPI.update(record.id, {
-            photo_url: publicUrl,
+            cropped_photo_url: publicUrl,  // Save to cropped_photo_url, not photo_url
             original_photo_url: record.original_photo_url || record.photo_url,
             processing_status: 'face_cropped',
           });
 
+          console.log('[Face Crop] Updated record', record.id, 'with cropped_photo_url:', publicUrl);
           processed++;
         } catch (err) {
           console.error('[Face Crop] Failed for record', record.id, err);
