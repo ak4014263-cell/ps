@@ -322,13 +322,121 @@ router.get('/get-photo/:recordId', async (req, res) => {
 });
 
 /**
+ * POST /api/image/face-crop
+ * Process image as school ID photo (background removal + face detection + alignment)
+ */
+router.post('/face-crop', upload.single('image'), async (req, res) => {
+  try {
+    if (!req.file) {
+      return res.status(400).json({ success: false, error: 'No image uploaded' });
+    }
+
+    const inputPath = req.file.path;
+    const outputPath = path.join(PROCESSED_DIR, `face-crop-${Date.now()}.png`);
+
+    console.log(`[Face Crop] Processing image: ${inputPath}`);
+
+    // Call Python school ID processor
+    const pythonScript = path.join(__dirname, '..', 'tools', 'school_id_processor_cli.py');
+    const pythonProcess = spawn('python', [
+      pythonScript,
+      inputPath,
+      outputPath
+    ]);
+
+    let stdout = '';
+    let stderr = '';
+
+    pythonProcess.stdout.on('data', (data) => {
+      stdout += data.toString();
+      console.log(`[Face Crop] stdout:`, data.toString());
+    });
+
+    pythonProcess.stderr.on('data', (data) => {
+      stderr += data.toString();
+      console.error(`[Face Crop] stderr:`, data.toString());
+    });
+
+    pythonProcess.on('close', (code) => {
+      // Clean up input file
+      if (fs.existsSync(inputPath)) fs.unlinkSync(inputPath);
+
+      if (code === 2) {
+        // Exit code 2 = no face detected
+        console.warn(`[Face Crop] No face detected in image`);
+        if (fs.existsSync(outputPath)) fs.unlinkSync(outputPath);
+        return res.status(400).json({
+          success: false,
+          error: 'No face detected in the provided image. Please upload a clear photo of a face.'
+        });
+      }
+
+      if (code !== 0) {
+        console.error(`[Face Crop] Python process exited with code ${code}`);
+        if (fs.existsSync(outputPath)) fs.unlinkSync(outputPath);
+        return res.status(500).json({
+          success: false,
+          error: `Face crop processing failed: ${stderr || 'Unknown error'}`
+        });
+      }
+
+      // Check if output file was created
+      if (!fs.existsSync(outputPath)) {
+        return res.status(500).json({
+          success: false,
+          error: 'Face crop processing failed: No output generated'
+        });
+      }
+
+      // Read the processed image
+      const imageBuffer = fs.readFileSync(outputPath);
+      const base64 = imageBuffer.toString('base64');
+      const dataUrl = `data:image/png;base64,${base64}`;
+
+      console.log(`[Face Crop] Successfully processed: ${outputPath}`);
+
+      // Clean up output file
+      if (fs.existsSync(outputPath)) fs.unlinkSync(outputPath);
+
+      res.json({
+        success: true,
+        processedImageUrl: dataUrl,
+        message: 'Face crop processed successfully'
+      });
+    });
+
+    // Set timeout (120 seconds - model loading can be slow on first run)
+    setTimeout(() => {
+      if (pythonProcess.exitCode === null) {
+        pythonProcess.kill();
+        if (fs.existsSync(inputPath)) fs.unlinkSync(inputPath);
+        if (fs.existsSync(outputPath)) fs.unlinkSync(outputPath);
+        res.status(500).json({
+          success: false,
+          error: 'Face crop processing timeout (took longer than 120 seconds)'
+        });
+      }
+    }, 120000);
+  } catch (error) {
+    console.error('[Face Crop] Error:', error);
+    if (req.file && fs.existsSync(req.file.path)) {
+      fs.unlinkSync(req.file.path);
+    }
+    res.status(500).json({
+      success: false,
+      error: error.message
+    });
+  }
+});
+
+/**
  * GET /api/image/face-crop-status
  * Check if face crop service is available
  */
 router.get('/face-crop-status', (req, res) => {
   res.json({
-    available: false,
-    message: 'Face crop service has been removed'
+    available: true,
+    message: 'Face crop service available (InsightFace buffalo_l)'
   });
 });
 

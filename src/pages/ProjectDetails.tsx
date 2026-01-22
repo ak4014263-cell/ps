@@ -782,6 +782,98 @@ export default function ProjectDetails() {
     }
   };
 
+  // AI Face Crop (InsightFace buffalo_l)
+  const handleFaceCropImages = async () => {
+    if (selectedRecordIds.size === 0) {
+      toast.error('Please select at least one photo to face crop');
+      return;
+    }
+
+    const recordsToProcess = records.filter(r => selectedRecordIds.has(r.id) && r.photo_url);
+    if (recordsToProcess.length === 0) {
+      toast.error('No selected photos to face crop');
+      return;
+    }
+
+    setIsProcessing(true);
+    toast.info(`Face cropping ${recordsToProcess.length} selected photos...`);
+
+    try {
+      let processed = 0;
+      for (const record of recordsToProcess) {
+        try {
+          const imgRes = await fetch(record.photo_url!);
+          if (!imgRes.ok) throw new Error(`Failed to fetch image (${imgRes.status})`);
+          const blob = await imgRes.blob();
+
+          const formData = new FormData();
+          formData.append('image', blob);
+
+          const cropRes = await fetch('http://localhost:3001/api/image/face-crop', {
+            method: 'POST',
+            body: formData,
+          });
+
+          if (!cropRes.ok) {
+            const txt = await cropRes.text();
+            throw new Error(`Face crop API error ${cropRes.status}: ${txt}`);
+          }
+
+          const result = await cropRes.json();
+          if (!result.success) {
+            throw new Error(result.error || 'Face crop failed');
+          }
+
+          // Convert data URL back to blob
+          const dataUrl = result.processedImageUrl;
+          const response2 = await fetch(dataUrl);
+          const croppedBlob = await response2.blob();
+
+          if (!croppedBlob || croppedBlob.size === 0) throw new Error('Empty cropped image');
+
+          // Save cropped blob in DB via backend
+          const saveFormData = new FormData();
+          saveFormData.append('photo', new File([croppedBlob], 'face_cropped.jpg', { type: 'image/jpeg' }));
+          saveFormData.append('recordId', record.id);
+          saveFormData.append('photoType', 'face_cropped');
+
+          const saveResponse = await fetch('http://localhost:3001/api/image/save-photo', {
+            method: 'POST',
+            body: saveFormData,
+          });
+
+          if (!saveResponse.ok) {
+            const errTxt = await saveResponse.text();
+            throw new Error(`Save failed ${saveResponse.status}: ${errTxt}`);
+          }
+
+          const saveData = await saveResponse.json();
+          if (!saveData.success) throw new Error(saveData.error || 'Save failed');
+
+          const publicUrl = saveData.url;
+
+          await apiService.dataRecordsAPI.update(record.id, {
+            photo_url: publicUrl,
+            original_photo_url: record.original_photo_url || record.photo_url,
+            processing_status: 'face_cropped',
+          });
+
+          processed++;
+        } catch (err) {
+          console.error('[Face Crop] Failed for record', record.id, err);
+        }
+      }
+
+      queryClient.invalidateQueries({ queryKey: ['project-records', projectId] });
+      toast.success(`Face crop completed: ${processed}/${recordsToProcess.length} processed`);
+    } catch (error) {
+      console.error('[Face Crop] Error:', error);
+      toast.error('Face crop failed');
+    } finally {
+      setIsProcessing(false);
+    }
+  };
+
   // Reset Photos
   const handleResetPhotos = async () => {
     if (selectedRecordIds.size === 0) {
@@ -1185,6 +1277,10 @@ export default function ProjectDetails() {
                     <DropdownMenuItem onClick={handleBeautifyImages}>
                       <Wand2 className="mr-2 h-4 w-4" />
                       Beautify Images
+                    </DropdownMenuItem>
+                    <DropdownMenuItem onClick={handleFaceCropImages}>
+                      <Crop className="mr-2 h-4 w-4" />
+                      Face Crop (AI)
                     </DropdownMenuItem>
                     <DropdownMenuItem onClick={handleAIBackgroundRemover}>
                       <Eraser className="mr-2 h-4 w-4" />
