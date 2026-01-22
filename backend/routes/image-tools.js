@@ -331,13 +331,14 @@ router.post('/face-crop', upload.single('image'), async (req, res) => {
       return res.status(400).json({ success: false, error: 'No image uploaded' });
     }
 
-    const inputPath = req.file.path;
+    // Convert to absolute paths (Python needs absolute paths to work correctly)
+    const inputPath = path.resolve(req.file.path);
     const outputPath = path.join(PROCESSED_DIR, `face-crop-${Date.now()}.png`);
 
     console.log(`[Face Crop] Processing image: ${inputPath}`);
 
     // Call Python school ID processor
-    const pythonScript = path.join(__dirname, '..', 'tools', 'school_id_processor_cli.py');
+    const pythonScript = path.resolve(path.join(__dirname, '..', 'tools', 'school_id_processor_cli.py'));
     const pythonProcess = spawn('python', [
       pythonScript,
       inputPath,
