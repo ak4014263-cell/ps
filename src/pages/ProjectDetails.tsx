@@ -806,8 +806,9 @@ export default function ProjectDetails() {
       let processed = 0;
       for (const record of recordsToProcess) {
         try {
-          // Build absolute URL - photos are stored in backend/uploads/project-photos/[projectId]/
+          // Build photo URL - photos are stored in backend/uploads/project-photos/[projectId]/
           let photoUrl = record.photo_url!;
+          
           if (!photoUrl.startsWith('http')) {
             // If it's just a filename, prepend the project-specific uploads path
             if (!photoUrl.includes('/')) {
@@ -815,11 +816,12 @@ export default function ProjectDetails() {
               const projId = record.project_id || projectId;
               photoUrl = `/uploads/project-photos/${projId}/${photoUrl}`;
             }
-            // Ensure leading slash
+            // Ensure leading slash for relative URL
             if (!photoUrl.startsWith('/')) {
               photoUrl = '/' + photoUrl;
             }
-            photoUrl = `http://localhost:3001${photoUrl}`;
+            // Use relative URL (not localhost:3001) to work in all environments
+            // fetch() will use the current backend URL
           }
           
           console.log('[Face Crop] Fetching image from:', photoUrl, 'Project ID:', record.project_id, 'Record photo_url:', record.photo_url);
@@ -841,7 +843,7 @@ export default function ProjectDetails() {
           // Explicitly set the correct mimetype
           formData.append('image', blob, 'photo.jpg');
 
-          const cropRes = await fetch('http://localhost:3001/api/image/face-crop', {
+          const cropRes = await fetch('/api/image/face-crop', {
             method: 'POST',
             body: formData,
           });
@@ -869,7 +871,7 @@ export default function ProjectDetails() {
           saveFormData.append('recordId', record.id);
           saveFormData.append('photoType', 'face_cropped');
 
-          const saveResponse = await fetch('http://localhost:3001/api/image/save-photo', {
+          const saveResponse = await fetch('/api/image/save-photo', {
             method: 'POST',
             body: saveFormData,
           });
