@@ -784,12 +784,16 @@ export default function ProjectDetails() {
 
   // AI Face Crop (InsightFace buffalo_l)
   const handleFaceCropImages = async () => {
+    console.log('[Face Crop] Button clicked, selectedRecordIds:', selectedRecordIds.size);
+    
     if (selectedRecordIds.size === 0) {
       toast.error('Please select at least one photo to face crop');
       return;
     }
 
     const recordsToProcess = records.filter(r => selectedRecordIds.has(r.id) && r.photo_url);
+    console.log('[Face Crop] Records to process:', recordsToProcess.length);
+    
     if (recordsToProcess.length === 0) {
       toast.error('No selected photos to face crop');
       return;
@@ -883,14 +887,16 @@ export default function ProjectDetails() {
           processed++;
         } catch (err) {
           console.error('[Face Crop] Failed for record', record.id, err);
+          toast.error(`Failed to crop record ${record.record_number}: ${err instanceof Error ? err.message : String(err)}`);
         }
       }
 
       queryClient.invalidateQueries({ queryKey: ['project-records', projectId] });
       toast.success(`Face crop completed: ${processed}/${recordsToProcess.length} processed`);
+      console.log('[Face Crop] Completed:', processed, 'of', recordsToProcess.length);
     } catch (error) {
       console.error('[Face Crop] Error:', error);
-      toast.error('Face crop failed');
+      toast.error('Face crop failed: ' + (error instanceof Error ? error.message : String(error)));
     } finally {
       setIsProcessing(false);
     }
