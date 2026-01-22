@@ -372,6 +372,16 @@ router.post('/process-school-id', upload.single('image'), async (req, res) => {
       // Clean up input file
       if (fs.existsSync(inputPath)) fs.unlinkSync(inputPath);
 
+      if (code === 2) {
+        // Exit code 2 = no face detected
+        console.warn(`[School ID] No face detected in image`);
+        if (fs.existsSync(outputPath)) fs.unlinkSync(outputPath);
+        return res.status(400).json({
+          success: false,
+          error: 'No face detected in the provided image. Please upload a clear photo of a face.'
+        });
+      }
+
       if (code !== 0) {
         console.error(`[School ID] Python process exited with code ${code}`);
         if (fs.existsSync(outputPath)) fs.unlinkSync(outputPath);

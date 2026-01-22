@@ -40,12 +40,13 @@ def main():
             print(f"[CLI] Successfully processed: {output_path}", flush=True)
             sys.exit(0)
         else:
-            print(f"[CLI] Failed to process: {input_path}", flush=True)
-            sys.exit(1)
+            # Return exit code 2 for "no face detected" (different from general failure)
+            print(f"[CLI] No face detected or processing failed: {input_path}", flush=True)
+            sys.exit(2)  # Special exit code for no face
     except Exception as e:
         print(f"[CLI] ERROR: {str(e)}", flush=True)
         import traceback
-        traceback.print_exc()
+        traceback.print_exc(file=sys.stdout)
         sys.exit(1)
 
 if __name__ == "__main__":

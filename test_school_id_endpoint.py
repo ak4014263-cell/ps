@@ -56,7 +56,7 @@ def test_endpoint(image_path):
             response = requests.post(
                 'http://localhost:3001/api/image/process-school-id',
                 files=files,
-                timeout=60
+                timeout=120  # 2 minutes for model loading on first run
             )
             
             print(f"[TEST] Status Code: {response.status_code}")
