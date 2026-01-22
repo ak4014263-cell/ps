@@ -805,6 +805,10 @@ export default function ProjectDetails() {
           // Build absolute URL if relative
           let photoUrl = record.photo_url!;
           if (!photoUrl.startsWith('http')) {
+            // Ensure leading slash
+            if (!photoUrl.startsWith('/')) {
+              photoUrl = '/' + photoUrl;
+            }
             photoUrl = `http://localhost:3001${photoUrl}`;
           }
           
