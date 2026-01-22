@@ -1,7 +1,7 @@
 """
-Image Processing Pipeline with Background Removal and Face Crop
+Image Processing Pipeline with Background Removal
 
-Handles photo/zip uploads, background removal, face cropping with queue integration.
+Handles photo/zip uploads, background removal with queue integration.
 Supports async processing with real-time progress updates.
 """
 
@@ -21,7 +21,7 @@ logger = logging.getLogger(__name__)
 
 class ImageProcessor:
     """
-    Processes images: background removal + face crop
+    Processes images: background removal
     """
     
     def __init__(self, temp_dir: str = None):
@@ -39,7 +39,6 @@ class ImageProcessor:
         self,
         image_bytes: bytes,
         remove_bg: bool = True,
-        crop_face: bool = True,
         model: str = "u2net"
     ) -> Tuple[bytes, Dict]:
         """
@@ -48,7 +47,6 @@ class ImageProcessor:
         Args:
             image_bytes: Image file bytes
             remove_bg: Remove background
-            crop_face: Crop face
             model: Rembg model to use
         
         Returns:
@@ -76,19 +74,6 @@ class ImageProcessor:
                 image = image.convert('RGBA')
                 metadata["steps"].append("background_removed")
                 logger.info("Background removed")
-            
-            # Crop face (optional)
-            if crop_face:
-                try:
-                    image, face_bbox = self._crop_face(image)
-                    if face_bbox:
-                        metadata["steps"].append("face_cropped")
-                        metadata["face_bbox"] = face_bbox
-                        logger.info(f"Face cropped: {face_bbox}")
-                    else:
-                        logger.warning("No face detected, skipping crop")
-                except Exception as e:
-                    logger.warning(f"Face crop failed: {str(e)}")
             
             # Save as PNG with transparency
             output_bytes = io.BytesIO()
@@ -174,7 +159,13 @@ class ImageProcessor:
             return image, None
         except Exception as e:
             logger.error(f"Face crop error: {str(e)}")
-            return image, None
+    
+    def _crop_face(self, image: Image.Image) -> Tuple[Image.Image, Optional[Dict]]:
+        """
+        Detect and crop face from image (REMOVED)
+        """
+        logger.info("Face crop feature removed")
+        return image, None
 
 
 class ZipHandler:
