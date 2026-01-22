@@ -347,9 +347,10 @@ router.post('/process-school-id', upload.single('image'), async (req, res) => {
 
     console.log(`[School ID] Processing image: ${inputPath}`);
 
-    // Call Python school ID processor
+    // Call Python school ID processor (use direct path)
+    const pythonScript = path.join(__dirname, '..', 'tools', 'school_id_processor_cli.py');
     const pythonProcess = spawn('python', [
-      path.join(__dirname, '..', '..', 'rembg-microservice', 'school_id_processor_cli.py'),
+      pythonScript,
       inputPath,
       outputPath
     ]);

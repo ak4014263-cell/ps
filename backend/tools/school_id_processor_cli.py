@@ -7,10 +7,14 @@ Usage: python school_id_processor_cli.py <input_image> <output_image>
 import sys
 import os
 
-# Add parent directory to path so we can import from rembg-microservice
+# Add rembg-microservice directory to path so we can import school_id_processor
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', '..', 'rembg-microservice'))
 
-from school_id_processor import SchoolIDProcessor
+try:
+    from school_id_processor import SchoolIDProcessor
+except ImportError as e:
+    print(f"Error importing SchoolIDProcessor: {e}")
+    sys.exit(1)
 
 def main():
     if len(sys.argv) < 3:
