@@ -3,7 +3,7 @@
  * Processes queued jobs for background removal
  */
 import dotenv from 'dotenv';
-import { bgRemovalQueue, faceCropQueue } from './lib/queue.js';
+import { bgRemovalQueue } from './lib/queue.js';
 import { query, execute } from './db.js';
 import fetch from 'node-fetch';
 
@@ -42,22 +42,7 @@ if (bgRemovalQueue.process) {
   });
 }
 
-/**
- * Process face crop job
- */
-if (faceCropQueue.process) {
-  faceCropQueue.process('*', 3, async (job) => {
-    console.log(`[Worker] Processing face crop job ${job.id}`);
-    try {
-      const { recordId } = job.data;
-      if (job.progress) await job.progress(100);
-      return { success: true, recordId };
-    } catch (error) {
-      console.error(`[Worker] ❌ Face crop failed:`, error.message);
-      throw error;
-    }
-  });
-}
+
 
 /**
  * Health check endpoint handler
@@ -75,6 +60,5 @@ console.log('[Worker] 🚀 Background job worker ready');
 
 export {
   bgRemovalQueue,
-  faceCropQueue,
   getNextRembgUrl,
 };

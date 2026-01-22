@@ -5,7 +5,6 @@
 import { SimpleQueue } from './simpleQueue.js';
 
 export const bgRemovalQueue = new SimpleQueue('background-removal');
-export const faceCropQueue = new SimpleQueue('face-crop');
 export const imageProcessingQueue = new SimpleQueue('image-processing');
 
 console.log('[Queue] 📦 Using in-memory SimpleQueue for development');
@@ -29,24 +28,7 @@ export async function addBgRemovalJob(data) {
   }
 }
 
-/**
- * Add a job to face crop queue
- */
-export async function addFaceCropJob(data) {
-  try {
-    const job = await faceCropQueue.add(data, {
-      attempts: 1,
-      removeOnComplete: true,
-      removeOnFail: false,
-      timeout: 60000,
-    });
-    console.log(`[Queue] ➕ Face crop job ${job.id} queued`);
-    return job;
-  } catch (error) {
-    console.error('[Queue] ❌ Failed to add face crop job:', error);
-    throw error;
-  }
-}
+
 
 /**
  * Get job status

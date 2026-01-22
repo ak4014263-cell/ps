@@ -48,37 +48,6 @@ const storage = multer.diskStorage({
   },
 });
 
-/**
- * Apply face crop with white padding to image
- * @param {string} imagePath - Path to image file
- * @param {number} paddingPixels - Padding in pixels (default: 20)
- * @returns {Promise<Buffer>} - Cropped image buffer
- */
-async function applyFaceCropWithPadding(imagePath, paddingPixels = 20) {
-  try {
-    console.log(`[FaceCrop] Processing image: ${imagePath}`);
-    
-    // Apply padding with white background
-    const paddedBuffer = await sharp(imagePath)
-      .extend({
-        top: paddingPixels,
-        bottom: paddingPixels,
-        left: paddingPixels,
-        right: paddingPixels,
-        background: { r: 255, g: 255, b: 255, alpha: 1 }
-      })
-      .jpeg({ quality: 95 })
-      .toBuffer();
-    
-    console.log(`[FaceCrop] ✅ Image cropped and padded: ${paddedBuffer.length} bytes`);
-    return paddedBuffer;
-  } catch (err) {
-    console.error(`[FaceCrop] ❌ Error applying crop:`, err.message);
-    // Return original image on error
-    return fs.readFileSync(imagePath);
-  }
-}
-
 const upload = multer({
   storage,
   limits: { fileSize: 5 * 1024 * 1024 * 1024 }, // 5GB for ZIP
@@ -164,19 +133,11 @@ router.post('/upload-zip', upload.single('file'), async (req, res) => {
             await execute(
               `INSERT INTO data_records (id, project_id, processing_status) 
                VALUES (?, ?, ?)`,
-              [recordId, projectId, 'processing_face_crop']
+              [recordId, projectId, 'queued']
             );
 
-            // Apply face crop with padding before queuing
-            console.log(`[Batch] 🔄 Applying face crop to image ${imageCount}`);
-            const croppedBuffer = await applyFaceCropWithPadding(tempImagePath);
-            
-            // Save cropped image
-            const croppedImagePath = path.join(TMP_DIR, `cropped-${Date.now()}-${imageCount}.jpg`);
-            fs.writeFileSync(croppedImagePath, croppedBuffer);
-
-            // Queue face detection job with cropped image
-            const imageUrl = `file://${croppedImagePath}`;
+            // Queue face detection job with original image
+            const imageUrl = `file://${tempImagePath}`;
             await addFaceDetectionJob({
               recordId,
               batchId,
@@ -185,7 +146,7 @@ router.post('/upload-zip', upload.single('file'), async (req, res) => {
             });
 
             queued++;
-            console.log(`[Batch] ✅ Cropped and queued image ${imageCount} for batch ${batchId}`);
+            console.log(`[Batch] ✅ Queued image ${imageCount} for batch ${batchId}`);
           } catch (err) {
             console.error(`[Batch] ❌ Failed to process image:`, err.message);
           }
@@ -212,15 +173,15 @@ router.post('/upload-zip', upload.single('file'), async (req, res) => {
           finishedExtracting: Date.now(),
         });
 
-        console.log(`[Batch] ✅ ZIP extraction complete: ${queued} images face-cropped and queued`);
+        console.log(`[Batch] ✅ ZIP extraction complete: ${queued} images queued for processing`);
 
         res.json({
           success: true,
           batchId,
           imageCount,
           queuedCount: queued,
-          message: `${queued} images extracted, face-cropped with padding, and queued for processing`,
-          status: 'face_crop_applied'
+          message: `${queued} images extracted and queued for processing`,
+          status: 'queued'
         });
       })
       .on('error', (err) => {
