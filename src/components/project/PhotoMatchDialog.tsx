@@ -38,35 +38,6 @@ const PROCESS_BATCH_SIZE = 500; // Process 500 files at a time from ZIP
 
 
 // Face crop helper - uses backend InsightFace detector
-async function cropFacePhoto(photoBlob: Blob, padding: number): Promise<Blob | null> {
-  try {
-    // Convert blob to base64
-    const reader = new FileReader();
-    const base64 = await new Promise<string>((resolve, reject) => {
-      reader.onload = () => resolve((reader.result as string).split(',')[1]);
-      reader.onerror = reject;
-      reader.readAsDataURL(photoBlob);
-    });
-
-    const response = await fetch('http://localhost:3001/api/image/crop-face', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ imageBase64: base64, padding })
-    });
-
-    if (!response.ok) {
-      const errorText = await response.text();
-      console.error(`[Face Crop] API error ${response.status}:`, errorText);
-      return null;
-    }
-
-    return await response.blob();
-  } catch (err) {
-    console.error('[Face Crop] Error calling face crop endpoint:', err);
-    return null;
-  }
-}
-
 export function PhotoMatchDialog({ projectId, records }: PhotoMatchDialogProps) {
   const [open, setOpen] = useState(false);
   const [isProcessing, setIsProcessing] = useState(false);
@@ -81,8 +52,6 @@ export function PhotoMatchDialog({ projectId, records }: PhotoMatchDialogProps) 
   const [fastMode, setFastMode] = useState(false);
   const [removeBackground, setRemoveBackground] = useState(false);
   const [autoCrop, setAutoCrop] = useState(false);
-  const [faceCrop, setFaceCrop] = useState(false);
-  const [faceCropPadding, setFaceCropPadding] = useState(20);
   const [cropWidth, setCropWidth] = useState(400);
   const [cropHeight, setCropHeight] = useState(400);
   const matchesRef = useRef<PhotoMatch[]>([]);
@@ -327,49 +296,8 @@ export function PhotoMatchDialog({ projectId, records }: PhotoMatchDialogProps) 
         }
       }
 
-      // Step 2: Face crop processing (MTCNN AI detection)
-      if (faceCrop) {
-        try {
-          toast.loading('Face cropping images...');
-          console.log(`[Upload FC] Starting face crop processing on ${processedPhotos.length} photos with padding=${faceCropPadding}`);
-          
-          const faceCropPromises = processedPhotos.map((photo) =>
-            cropFacePhoto(photo.blob, faceCropPadding)
-              .then((croppedBlob) => croppedBlob || photo.blob)
-              .catch((err) => {
-                console.warn(`[Upload FC] Face crop failed for ${photo.filename}, using original:`, err);
-                return photo.blob;
-              })
-          );
-
-          const faceCroppedBlobs = await Promise.allSettled(faceCropPromises);
-          
-          processedPhotos = processedPhotos.map((photo, index) => {
-            const result = faceCroppedBlobs[index];
-            if (result.status === 'fulfilled' && result.value) {
-              return { ...photo, blob: result.value };
-            }
-            return photo;
-          });
-
-          const successCount = faceCroppedBlobs.filter(r => r.status === 'fulfilled' && r.value).length;
-          toast.dismiss();
-          toast.success(`Face crop applied to ${successCount}/${processedPhotos.length} images`);
-          console.log(`[Upload FC] SUCCESS: Face cropped ${successCount} photos`);
-          setProgress(faceCrop && removeBackground ? 66 : removeBackground ? 50 : 33);
-        } catch (fcError: any) {
-          console.error('[Upload FC] Face crop error:', fcError);
-          toast.dismiss();
-          const errorMsg = fcError?.message || String(fcError);
-          toast.error(`Face crop processing failed: ${errorMsg}. Continuing with original images.`);
-          // Continue with original images
-        }
-      }
-
-      // Step 3: Upload photos to database
-      setProgress(faceCrop && removeBackground ? 66 : removeBackground ? 50 : faceCrop ? 33 : 0);
-      
-      console.log(`[Upload] Starting database storage of ${processedPhotos.length} photos (autoCrop=${autoCrop}, faceCrop=${faceCrop})`);
+      // Step 2: Upload photos to database
+      setProgress(removeBackground ? 50 : 0);
       
       // Store photos in batches to avoid overloading the database
       for (let i = 0; i < processedPhotos.length; i += UPLOAD_BATCH_SIZE) {
@@ -544,22 +472,6 @@ export function PhotoMatchDialog({ projectId, records }: PhotoMatchDialogProps) 
               />
             </div>
 
-            {/* Face Crop Toggle */}
-            <div className="flex items-center justify-between">
-              <div className="flex items-center gap-2">
-                <Crop className="h-4 w-4 text-purple-500" />
-                <Label htmlFor="face-crop" className="text-sm">
-                  Face Crop (MTCNN AI)
-                </Label>
-              </div>
-              <Switch
-                id="face-crop"
-                checked={faceCrop}
-                onCheckedChange={setFaceCrop}
-                disabled={isProcessing || isUploading}
-              />
-            </div>
-
             {/* Auto Crop Dimensions */}
             {autoCrop && (
               <div className="flex items-center gap-4 pl-6">
@@ -582,26 +494,6 @@ export function PhotoMatchDialog({ projectId, records }: PhotoMatchDialogProps) 
                     value={cropHeight}
                     onChange={(e) => setCropHeight(Number(e.target.value))}
                     className="w-20 h-7 text-xs"
-                    disabled={isProcessing || isUploading}
-                  />
-                </div>
-                <span className="text-xs text-muted-foreground">px</span>
-              </div>
-            )}
-
-            {/* Face Crop Padding */}
-            {faceCrop && (
-              <div className="flex items-center gap-4 pl-6">
-                <div className="flex items-center gap-2">
-                  <Label htmlFor="face-padding" className="text-xs text-muted-foreground">Padding:</Label>
-                  <Input
-                    id="face-padding"
-                    type="number"
-                    value={faceCropPadding}
-                    onChange={(e) => setFaceCropPadding(Number(e.target.value))}
-                    className="w-20 h-7 text-xs"
-                    min="0"
-                    max="100"
                     disabled={isProcessing || isUploading}
                   />
                 </div>

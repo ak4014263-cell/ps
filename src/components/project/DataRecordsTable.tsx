@@ -41,7 +41,6 @@ import { apiService } from '@/lib/api';
 import { useQueryClient } from '@tanstack/react-query';
 import { toast } from 'sonner';
 import { removeBackgroundBatch, getBackgroundRemovalConfig } from '@/lib/backgroundRemoval';
-import { detectAndCropFace } from '@/lib/faceDetection';
 import { uploadToCloudinary } from '@/lib/cloudinary';
 import { cropImageToBlob, CropArea } from '@/lib/cropUtils';
 import {
@@ -83,7 +82,6 @@ interface DataRecordsTableProps {
 }
 
 export function DataRecordsTable({ records, projectId, groups = [], onEditRecord, onSelectionChange }: DataRecordsTableProps) {
-  const [bulkCropMode, setBulkCropMode] = useState<'passport' | 'idcard'>('idcard');
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const [showDeleteDialog, setShowDeleteDialog] = useState(false);
   const [recordToDelete, setRecordToDelete] = useState<DataRecord | null>(null);
@@ -94,8 +92,6 @@ export function DataRecordsTable({ records, projectId, groups = [], onEditRecord
   const [showFilters, setShowFilters] = useState(false);
   const [isRemovingBackground, setIsRemovingBackground] = useState(false);
   const [bgRemovalProgress, setBgRemovalProgress] = useState(0);
-  const [isAutoCropping, setIsAutoCropping] = useState(false);
-  const [cropProgress, setCropProgress] = useState(0);
   // Interactive crop dialog state
   const [cropDialogOpen, setCropDialogOpen] = useState(false);
   const [cropDialogImage, setCropDialogImage] = useState<{ url: string; recordId: string } | null>(null);
@@ -224,128 +220,6 @@ export function DataRecordsTable({ records, projectId, groups = [], onEditRecord
       toast.error('Failed to delete records');
     } finally {
       setIsDeleting(false);
-    }
-  };
-
-  const handleAICropSelected = async () => {
-    if (selectedIds.size === 0) {
-      toast.error('Please select records with photos');
-      return;
-    }
-
-    setIsAutoCropping(true);
-    setCropProgress(0);
-    const toastId = toast.loading(`Auto-cropping ${selectedIds.size} selected photos...`);
-
-    try {
-      console.log('[AI Crop] Starting auto-crop for', selectedIds.size, 'records');
-      const selectedRecords = records.filter(r => selectedIds.has(r.id) && getPhotoUrl(r));
-      if (selectedRecords.length === 0) {
-        toast.dismiss(toastId);
-        toast.error('Selected records have no photos');
-        setIsAutoCropping(false);
-        return;
-      }
-
-      console.log('[AI Crop] Found', selectedRecords.length, 'records with photos');
-      const photoTasks: { recordId: string; blob: Blob }[] = [];
-      for (const record of selectedRecords) {
-        const url = getPhotoUrl(record);
-        if (!url) continue;
-        try {
-          const blob = await fetchPhotoBlob(url);
-          if (blob) {
-            photoTasks.push({ recordId: record.id, blob });
-          }
-        } catch (fetchErr) {
-          console.warn(`[AI Crop] Failed to fetch blob for record ${record.id}:`, fetchErr);
-        }
-      }
-
-      console.log('[AI Crop] Fetched', photoTasks.length, 'photo blobs');
-
-      let processed = 0;
-      let failed = 0;
-      const errors: string[] = [];
-
-      for (let i = 0; i < photoTasks.length; i++) {
-        const { recordId, blob } = photoTasks[i];
-        try {
-          console.log(`[AI Crop] Processing ${i + 1}/${photoTasks.length}: ${recordId}`);
-          const objUrl = URL.createObjectURL(blob);
-          
-          let cropRes;
-          try {
-            cropRes = await detectAndCropFace(objUrl, { mode: bulkCropMode, outputWidth: 600, outputHeight: 400 });
-          } finally {
-            URL.revokeObjectURL(objUrl);
-          }
-
-          console.log(`[AI Crop] Face detection succeeded for ${recordId}`, {
-            coordinates: cropRes.coordinates
-          });
-
-          const croppedBlob = await (await fetch(cropRes.croppedImageUrl)).blob();
-          console.log(`[AI Crop] Fetched cropped blob for ${recordId}: ${croppedBlob.size} bytes`);
-
-          // Try upload to Cloudinary
-          try {
-            console.log(`[AI Crop] Uploading to Cloudinary: ${recordId}`);
-            const uploadResult = await uploadToCloudinary(croppedBlob, {
-              folder: `project-photos/${projectId}`,
-              publicId: `crop-${recordId}`,
-              resourceType: 'image',
-              autoCrop: false,
-            });
-
-            console.log(`[AI Crop] Upload succeeded for ${recordId}: ${uploadResult.url}`);
-            
-            await apiService.dataRecordsAPI.update(recordId, {
-              cropped_photo_url: uploadResult.url,
-              face_crop_coordinates: cropRes.coordinates
-            });
-            
-            console.log(`[AI Crop] Database updated for ${recordId}`);
-            processed++;
-          } catch (upErr) {
-            const errMsg = upErr instanceof Error ? upErr.message : String(upErr);
-            console.error(`[AI Crop] Upload/update failed for ${recordId}:`, upErr);
-            errors.push(`${recordId}: ${errMsg}`);
-            failed++;
-          }
-        } catch (cropErr) {
-          const errMsg = cropErr instanceof Error ? cropErr.message : String(cropErr);
-          console.error(`[AI Crop] Face crop failed for ${recordId}:`, cropErr);
-          errors.push(`${recordId}: ${errMsg}`);
-          failed++;
-        }
-
-        setCropProgress(Math.round(((processed + failed) / photoTasks.length) * 100));
-      }
-
-      toast.dismiss(toastId);
-      if (processed > 0) {
-        console.log(`[AI Crop] SUCCESS: ${processed}/${photoTasks.length} photos cropped`);
-        if (failed > 0) {
-          toast.success(`Auto-cropped ${processed}/${photoTasks.length} photos (${failed} failed)`);
-        } else {
-          toast.success(`Successfully auto-cropped ${processed} photos`);
-        }
-      } else {
-        console.error(`[AI Crop] FAILED: All photos failed. Errors:`, errors);
-        toast.error(`Failed to crop all ${photoTasks.length} photos:\n${errors.slice(0, 3).join('\n')}`);
-      }
-      
-      setSelectedIds(new Set());
-      queryClient.invalidateQueries({ queryKey: ['project-records', projectId] });
-    } catch (error) {
-      console.error('[AI Crop] Fatal error:', error);
-      toast.dismiss(toastId);
-      const errorMsg = error instanceof Error ? error.message : String(error);
-      toast.error(`Auto-crop failed: ${errorMsg}`);
-    } finally {
-      setIsAutoCropping(false);
-      setCropProgress(0);
     }
   };
 
@@ -654,7 +528,7 @@ export function DataRecordsTable({ records, projectId, groups = [], onEditRecord
       return url.replace(/http:\/\/localhost:5000/g, backendBase);
     };
 
-    // Prefer cropped photo when available (e.g. AI face crop)
+    // Prefer cropped photo when available (e.g. manual user crop)
     if (record.cropped_photo_url) {
       let url = record.cropped_photo_url;
       
@@ -1036,19 +910,6 @@ export function DataRecordsTable({ records, projectId, groups = [], onEditRecord
                     <DropdownMenuSeparator />
                   </>
                 )}
-                <DropdownMenuItem disabled={selectedIds.size === 0 || isAutoCropping} onClick={handleAICropSelected}>
-                  {isAutoCropping ? (
-                    <>
-                      <Loader2 className="h-4 w-4 mr-2 animate-spin" />
-                      Cropping... {cropProgress}%
-                    </>
-                  ) : (
-                    <>
-                      <Image className="h-4 w-4 mr-2" />
-                      AI Image Crop
-                    </>
-                  )}
-                </DropdownMenuItem>
                 <DropdownMenuItem 
                   disabled={selectedIds.size === 0 || isRemovingBackground}
                   onClick={handleRemoveBackgroundBulk}

@@ -5,10 +5,9 @@ import { ColumnMapper } from '@/components/data/ColumnMapper';
 import { PhotoUpload } from '@/components/data/PhotoUpload';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
-import { Database, Image, Wand2, Download, Loader2, Crop } from 'lucide-react';
+import { Database, Image, Download, Loader2 } from 'lucide-react';
 import { toast } from 'sonner';
 import { removeBackgroundBatch, getBackgroundRemovalConfig } from '@/lib/backgroundRemoval';
-import { detectAndCropFace } from '@/lib/faceDetection';
 import { Progress } from '@/components/ui/progress';
 import JSZip from 'jszip';
 
@@ -22,7 +21,6 @@ export default function DataManagement() {
   const [isDownloading, setIsDownloading] = useState(false);
   const [processProgress, setProcessProgress] = useState(0);
   const [processedPhotos, setProcessedPhotos] = useState<{ filename: string; blob: Blob }[]>([]);
-  const [cropMode, setCropMode] = useState<'passport' | 'idcard'>('idcard');
 
   const handleDataParsed = (data: any[], columns: string[]) => {
     setUploadedData(data);
@@ -42,6 +40,7 @@ export default function DataManagement() {
     toast.success(`${photos.length.toLocaleString()} photos uploaded successfully`);
   };
 
+
   const handleProcessData = async () => {
     if (uploadedPhotos.length === 0) {
       toast.error('No photos uploaded');
@@ -50,37 +49,16 @@ export default function DataManagement() {
 
     setIsProcessing(true);
     setProcessProgress(0);
-    toast.loading('Running face detection and auto-crop...');
-
-    const processed: { filename: string; blob: Blob }[] = [];
-
+    
     try {
-      for (let i = 0; i < uploadedPhotos.length; i++) {
-        const photo = uploadedPhotos[i];
-        const url = URL.createObjectURL(photo.blob);
-
-        try {
-          const result = await detectAndCropFace(url, { mode: cropMode });
-          // result.croppedImageUrl is a data URL (png)
-          const blob = await (await fetch(result.croppedImageUrl)).blob();
-          processed.push({ filename: photo.filename, blob });
-        } catch (err) {
-          console.warn(`Auto-crop failed for ${photo.filename}, using original`, err);
-          processed.push({ filename: photo.filename, blob: photo.blob });
-        } finally {
-          URL.revokeObjectURL(url);
-        }
-
-        setProcessProgress(Math.round(((i + 1) / uploadedPhotos.length) * 100));
-      }
-
-      setProcessedPhotos(processed);
-      toast.dismiss();
-      toast.success(`Auto-crop completed for ${processed.length} photos`);
+      // For now, just pass through the photos without processing
+      // If needed, background removal can be called here
+      setProcessedPhotos(uploadedPhotos);
+      toast.success(`Ready to process ${uploadedPhotos.length} photos`);
     } catch (error) {
-      console.error('Auto-crop error:', error);
+      console.error('Processing error:', error);
       toast.dismiss();
-      toast.error('Failed to auto-crop photos');
+      toast.error('Processing failed');
     } finally {
       setIsProcessing(false);
     }
@@ -144,47 +122,6 @@ export default function DataManagement() {
     }
   };
 
-  const handlePassportCrop = async () => {
-    if (uploadedPhotos.length === 0) {
-      toast.error('No photos uploaded');
-      return;
-    }
-
-    setIsProcessing(true);
-    setProcessProgress(0);
-    toast.loading('Running advanced passport photo cropping...');
-
-    const processed: { filename: string; blob: Blob }[] = [];
-
-    try {
-      for (let i = 0; i < uploadedPhotos.length; i++) {
-        const photo = uploadedPhotos[i];
-        const url = URL.createObjectURL(photo.blob);
-
-        try {
-          processed.push({ filename: photo.filename, blob: photo.blob });
-        } catch (err) {
-          console.warn(`Processing failed for ${photo.filename}, using original`, err);
-          processed.push({ filename: photo.filename, blob: photo.blob });
-        } finally {
-          URL.revokeObjectURL(url);
-        }
-
-        setProcessProgress(Math.round(((i + 1) / uploadedPhotos.length) * 100));
-      }
-
-      setProcessedPhotos(processed);
-      toast.dismiss();
-      toast.success(`Passport crop completed for ${processed.length} photos`);
-    } catch (error) {
-      console.error('Passport crop error:', error);
-      toast.dismiss();
-      toast.error('Failed to crop passport photos');
-    } finally {
-      setIsProcessing(false);
-    }
-  };
-
 
   const handleDownloadPhotos = async () => {
     if (processedPhotos.length === 0) {
@@ -238,7 +175,7 @@ export default function DataManagement() {
     <main className="flex-1 p-6 bg-background">
       <div className="mb-6">
         <h1 className="text-3xl font-bold text-foreground">Data & Photo Management</h1>
-        <p className="text-muted-foreground">Upload and process data with AI-powered face detection and background removal</p>
+        <p className="text-muted-foreground">Upload and process data with background removal</p>
       </div>
 
       <div className="grid lg:grid-cols-3 gap-6">
@@ -305,25 +242,6 @@ export default function DataManagement() {
                   )}
 
                   <div className="space-y-2">
-                    <div className="flex items-center gap-2">
-                      <label className="text-sm">Crop Mode:</label>
-                      <select
-                        value={cropMode}
-                        onChange={(e) => setCropMode(e.target.value as any)}
-                        className="border rounded px-2 py-1 text-sm"
-                      >
-                        <option value="passport">Passport</option>
-                        <option value="idcard">ID Card (wider)</option>
-                      </select>
-                    </div>
-                    <Button 
-                      className="w-full" 
-                      onClick={handleProcessData}
-                    >
-                      <Wand2 className="h-4 w-4 mr-2" />
-                      Run Face Detection & Auto-Crop
-                    </Button>
-                    
                     <Button 
                       className="w-full" 
                       variant="outline"
@@ -338,25 +256,6 @@ export default function DataManagement() {
                       ) : (
                         <>
                           Remove Backgrounds
-                        </>
-                      )}
-                    </Button>
-
-                    <Button 
-                      className="w-full" 
-                      variant="secondary"
-                      onClick={handlePassportCrop}
-                      disabled={isProcessing || uploadedPhotos.length === 0}
-                    >
-                      {isProcessing ? (
-                        <>
-                          <Loader2 className="h-4 w-4 mr-2 animate-spin" />
-                          Cropping... {processProgress}%
-                        </>
-                      ) : (
-                        <>
-                          <Crop className="h-4 w-4 mr-2" />
-                          Advanced Passport Photo Crop
                         </>
                       )}
                     </Button>
@@ -382,11 +281,10 @@ export default function DataManagement() {
                   </div>
 
                   <div className="text-xs text-muted-foreground">
-                    <p className="font-medium mb-1">AI Features:</p>
+                    <p className="font-medium mb-1">Features:</p>
                     <ul className="list-disc list-inside space-y-1">
-                      <li>Face detection runs in browser (free, no API needed)</li>
                       <li>Background removal uses rotating free API keys</li>
-                      <li>All processing is automatic and fast</li>
+                      <li>Batch processing is automatic and fast</li>
                     </ul>
                   </div>
                 </CardContent>
