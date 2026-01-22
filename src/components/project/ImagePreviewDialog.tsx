@@ -38,13 +38,11 @@ export function ImagePreviewDialog({
 }: ImagePreviewDialogProps) {
   const [isRemoving, setIsRemoving] = useState(false);
   const [isCropping, setIsCropping] = useState(false);
-  const [isFaceCropping, setIsFaceCropping] = useState(false);
   const [isResetting, setIsResetting] = useState(false);
   const [isApplying, setIsApplying] = useState(false);
   const [isBeautifying, setIsBeautifying] = useState(false);
   const [processedUrl, setProcessedUrl] = useState<string | null>(null);
   const [beautifyStrength, setBeautifyStrength] = useState(70);  // 0-100, default 70%
-  const [faceCropPadding, setFaceCropPadding] = useState(20); // percent
   const queryClient = useQueryClient();
   
   // Image adjustment states
@@ -595,49 +593,6 @@ export function ImagePreviewDialog({
             )}
           </div>
 
-          {/* Face Crop Settings (SCRFD - Removed) - Hidden */}
-          <div className="grid gap-3 p-4 bg-muted/20 rounded-lg" style={{display: 'none'}}>
-            <h4 className="text-sm font-medium flex items-center gap-2">
-              <Crop className="h-4 w-4" />
-              Face Detection & Crop (Removed)
-            </h4>
-            
-            <div className="space-y-3">
-              <div className="space-y-2">
-                <div className="flex items-center justify-between">
-                  <Label className="text-xs">Face Padding: {faceCropPadding}%</Label>
-                  <span className="text-xs text-muted-foreground">0% (tight) to 50% (loose)</span>
-                </div>
-                <Slider
-                  value={[faceCropPadding]}
-                  onValueChange={([v]) => setFaceCropPadding(v)}
-                  min={0}
-                  max={50}
-                  step={1}
-                  className="w-full"
-                />
-              </div>
-
-              <Button
-                onClick={handleFaceCrop}
-                disabled={isFaceCropping || !imageUrl}
-                className="w-full"
-              >
-                {isFaceCropping ? (
-                  <>
-                    <Loader2 className="h-4 w-4 mr-2 animate-spin" />
-                    Detecting Face...
-                  </>
-                ) : (
-                  <>
-                    <Crop className="h-4 w-4 mr-2" />
-                    Crop Face (Disabled)
-                  </>
-                )}
-              </Button>
-            </div>
-          </div>
-
           {/* Passport Crop Options */}
           <div className="grid gap-2 p-4 bg-muted/20 rounded-lg">
             <h4 className="text-sm font-medium flex items-center gap-2">
@@ -709,24 +664,6 @@ export function ImagePreviewDialog({
             >
               <Download className="h-4 w-4 mr-2" />
               Download
-            </Button>
-            <Button
-              variant="outline"
-              onClick={handleFaceCrop}
-              disabled={isFaceCropping || !imageUrl}
-              title="AI face crop (buffalo_l)"
-            >
-              {isFaceCropping ? (
-                <>
-                  <Loader2 className="h-4 w-4 mr-2 animate-spin" />
-                  Cropping...
-                </>
-              ) : (
-                <>
-                  <Crop className="h-4 w-4 mr-2" />
-                  Face Crop
-                </>
-              )}
             </Button>
             <Button
               onClick={handleRemoveBackground}
