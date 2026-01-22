@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 import sys
 import os
+import tempfile
 
 # Add parent directory to path for imports
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', '..', 'rembg-microservice'))
@@ -18,7 +19,9 @@ if __name__ == '__main__':
     print(f"[School ID Processor CLI] Processing: {input_path}")
     
     try:
-        processor = SchoolIDProcessor(model_root='/root/.insightface')
+        # Use system temp directory for model cache (cross-platform)
+        model_root = os.path.join(tempfile.gettempdir(), '.insightface')
+        processor = SchoolIDProcessor(model_root=model_root)
         success = processor.process_id_photo(input_path, output_path)
         
         if success:

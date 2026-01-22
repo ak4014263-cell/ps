@@ -4,13 +4,20 @@ import os
 from insightface.app import FaceAnalysis
 from rembg import remove, new_session
 from PIL import Image
+import tempfile
 
 class SchoolIDProcessor:
-    def __init__(self, model_root='/root/.insightface'):
+    def __init__(self, model_root=None):
         """
         Initializes the processor specifically for CPU-only environments.
         """
-        print("Initializing AI Models (CPU Mode)...")
+        if model_root is None:
+            # Use system temp directory for model cache (cross-platform compatible)
+            model_root = os.path.join(tempfile.gettempdir(), '.insightface')
+            os.makedirs(model_root, exist_ok=True)
+        
+        print(f"Initializing AI Models (CPU Mode)...")
+        print(f"Model cache directory: {model_root}")
 
         # 1. Initialize InsightFace for CPU
         # name='buffalo_l' matches the folder name in your root
