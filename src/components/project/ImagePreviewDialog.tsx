@@ -341,30 +341,6 @@ export function ImagePreviewDialog({
     }
   };
 
-  const handleFaceCrop = async () => {
-    const currentUrl = processedUrl || imageUrl;
-    if (!currentUrl) return;
-
-    setIsFaceCropping(true);
-    toast.info('Detecting and cropping face...');
-
-    try {
-      console.log('[Face Crop] Starting with URL:', currentUrl);
-      console.log('[Face Crop] Padding:', faceCropPadding, '% =', faceCropPadding / 100);
-      
-      // Face crop processing has been removed
-      // This code path should not execute
-    } catch (error: any) {
-      console.error('Face crop failed:', error);
-      console.error('Error details:', {
-        message: error?.message,
-        stack: error?.stack,
-        statusCode: error?.statusCode,
-      });
-      toast.error(`Face crop failed: ${error?.message || 'Unknown error'}`);
-    } finally {
-      setIsFaceCropping(false);
-    }
   };
 
   const handleBeautify = async () => {

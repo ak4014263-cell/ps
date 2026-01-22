@@ -547,10 +547,7 @@ export default function ProjectDetails() {
         ...record,
         data_json: typeof record.data_json === 'string' 
           ? JSON.parse(record.data_json) 
-          : record.data_json,
-        face_crop_coordinates: record.face_crop_coordinates && typeof record.face_crop_coordinates === 'string'
-          ? JSON.parse(record.face_crop_coordinates)
-          : record.face_crop_coordinates
+          : record.data_json
       }));
     },
     enabled: !!projectId,
@@ -780,100 +777,6 @@ export default function ProjectDetails() {
       toast.success(`Background removal completed: ${processed}/${recordsToProcess.length} processed`);
     } catch (error) {
       toast.error('Background removal failed');
-    } finally {
-      setIsProcessing(false);
-    }
-  };
-
-  // AI Face Crop (InsightFace buffalo_l via backend)
-  const handleFaceCropImages = async () => {
-    if (selectedRecordIds.size === 0) {
-      toast.error('Please select at least one photo to face crop');
-      return;
-    }
-
-    const recordsToProcess = records.filter(r => selectedRecordIds.has(r.id) && r.photo_url);
-    if (recordsToProcess.length === 0) {
-      toast.error('No selected photos to face crop');
-      return;
-    }
-
-    setIsProcessing(true);
-    toast.info(`Face cropping ${recordsToProcess.length} selected photos...`);
-
-    const blobToBase64 = async (blob: Blob): Promise<string> => {
-      const reader = new FileReader();
-      return await new Promise<string>((resolve, reject) => {
-        reader.onload = () => {
-          const res = String(reader.result || '');
-          resolve(res.includes(',') ? res.split(',')[1] : res);
-        };
-        reader.onerror = () => reject(new Error('Failed to read image'));
-        reader.readAsDataURL(blob);
-      });
-    };
-
-    try {
-      let processed = 0;
-      for (const record of recordsToProcess) {
-        try {
-          const imgRes = await fetch(record.photo_url!);
-          if (!imgRes.ok) throw new Error(`Failed to fetch image (${imgRes.status})`);
-          const blob = await imgRes.blob();
-          const base64 = await blobToBase64(blob);
-
-          const cropRes = await fetch('http://localhost:3001/api/image/crop-face', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ imageBase64: base64, padding: 20 }),
-          });
-
-          if (!cropRes.ok) {
-            const txt = await cropRes.text();
-            throw new Error(`Face crop API error ${cropRes.status}: ${txt}`);
-          }
-
-          const croppedBlob = await cropRes.blob();
-          if (!croppedBlob || croppedBlob.size === 0) throw new Error('Empty cropped image');
-
-          // Save cropped blob in DB via backend
-          const saveFormData = new FormData();
-          saveFormData.append('photo', new File([croppedBlob], 'face_cropped.jpg', { type: 'image/jpeg' }));
-          saveFormData.append('recordId', record.id);
-          saveFormData.append('photoType', 'face_cropped');
-
-          const saveResponse = await fetch('http://localhost:3001/api/image/save-photo', {
-            method: 'POST',
-            body: saveFormData,
-          });
-
-          if (!saveResponse.ok) {
-            const errTxt = await saveResponse.text();
-            throw new Error(`Save failed ${saveResponse.status}: ${errTxt}`);
-          }
-
-          const saveData = await saveResponse.json();
-          if (!saveData.success) throw new Error(saveData.error || 'Save failed');
-
-          const publicUrl = saveData.url;
-
-          await apiService.dataRecordsAPI.update(record.id, {
-            cropped_photo_url: publicUrl,
-            original_photo_url: record.original_photo_url || record.photo_url,
-            processing_status: 'processed',
-          });
-
-          processed++;
-        } catch (err) {
-          console.error('[Face Crop] Failed for record', record.id, err);
-        }
-      }
-
-      queryClient.invalidateQueries({ queryKey: ['project-records', projectId] });
-      toast.success(`Face crop completed: ${processed}/${recordsToProcess.length} processed`);
-    } catch (error) {
-      console.error('[Face Crop] Error:', error);
-      toast.error('Face crop failed');
     } finally {
       setIsProcessing(false);
     }
