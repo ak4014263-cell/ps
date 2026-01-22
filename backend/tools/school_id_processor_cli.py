@@ -24,17 +24,28 @@ def main():
     input_path = sys.argv[1]
     output_path = sys.argv[2]
 
-    # Initialize processor
-    processor = SchoolIDProcessor(model_root='/root/.insightface')
+    try:
+        print(f"[CLI] Input: {input_path}", flush=True)
+        print(f"[CLI] Output: {output_path}", flush=True)
+        print(f"[CLI] Initializing SchoolIDProcessor...", flush=True)
+        
+        # Initialize processor
+        processor = SchoolIDProcessor(model_root='/root/.insightface')
+        
+        print(f"[CLI] Processor initialized, processing image...", flush=True)
+        # Process the image
+        success = processor.process_id_photo(input_path, output_path)
 
-    # Process the image
-    success = processor.process_id_photo(input_path, output_path)
-
-    if success:
-        print(f"Successfully processed: {output_path}")
-        sys.exit(0)
-    else:
-        print(f"Failed to process: {input_path}")
+        if success:
+            print(f"[CLI] Successfully processed: {output_path}", flush=True)
+            sys.exit(0)
+        else:
+            print(f"[CLI] Failed to process: {input_path}", flush=True)
+            sys.exit(1)
+    except Exception as e:
+        print(f"[CLI] ERROR: {str(e)}", flush=True)
+        import traceback
+        traceback.print_exc()
         sys.exit(1)
 
 if __name__ == "__main__":

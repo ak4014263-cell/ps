@@ -406,7 +406,7 @@ router.post('/process-school-id', upload.single('image'), async (req, res) => {
       });
     });
 
-    // Set timeout (30 seconds)
+    // Set timeout (90 seconds - model loading can be slow on first run)
     setTimeout(() => {
       if (pythonProcess.exitCode === null) {
         pythonProcess.kill();
@@ -414,10 +414,10 @@ router.post('/process-school-id', upload.single('image'), async (req, res) => {
         if (fs.existsSync(outputPath)) fs.unlinkSync(outputPath);
         res.status(500).json({
           success: false,
-          error: 'School ID processing timeout'
+          error: 'School ID processing timeout (took longer than 90 seconds)'
         });
       }
-    }, 30000);
+    }, 90000);
 
   } catch (error) {
     console.error('[School ID] Error:', error);
