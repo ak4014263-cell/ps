@@ -1,0 +1,737 @@
+import { useState, useRef, useCallback } from 'react';
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from '@/components/ui/dialog';
+import { Button } from '@/components/ui/button';
+import { Upload, Loader2, CheckCircle2, XCircle, ImagePlus, Zap, Rocket, Scissors, Eraser, Crop } from 'lucide-react';
+import { Alert, AlertDescription } from '@/components/ui/alert';
+import { Badge } from '@/components/ui/badge';
+import { toast } from 'sonner';
+import { apiService } from '@/lib/api';
+import { removeBackgroundBatch, getBackgroundRemovalConfig } from '@/lib/backgroundRemoval';
+import { useQueryClient } from '@tanstack/react-query';
+import JSZip from 'jszip';
+import { Progress } from '@/components/ui/progress';
+import { Switch } from '@/components/ui/switch';
+import { Label } from '@/components/ui/label';
+import { Input } from '@/components/ui/input';
+
+interface DataRecord {
+  id: string;
+  record_number: number;
+  data_json: Record<string, any>;
+  photo_url?: string | null;
+}
+
+interface PhotoMatchDialogProps {
+  projectId: string;
+  records: DataRecord[];
+}
+
+interface PhotoMatch {
+  filename: string;
+  blob: Blob;
+  matchedRecordId: string | null;
+}
+
+// Cloudinary uploads are slower due to edge function - lower concurrency
+const UPLOAD_BATCH_SIZE = 3; // Upload 3 files at a time (smaller batches for base64 data)
+const PROCESS_BATCH_SIZE = 500; // Process 500 files at a time from ZIP
+
+
+// Face crop helper - uses backend InsightFace detector
+async function cropFacePhoto(photoBlob: Blob, padding: number): Promise<Blob | null> {
+  try {
+    // Convert blob to base64
+    const reader = new FileReader();
+    const base64 = await new Promise<string>((resolve, reject) => {
+      reader.onload = () => resolve((reader.result as string).split(',')[1]);
+      reader.onerror = reject;
+      reader.readAsDataURL(photoBlob);
+    });
+
+    const response = await fetch('http://localhost:3001/api/image/crop-face', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ imageBase64: base64, padding })
+    });
+
+    if (!response.ok) {
+      const errorText = await response.text();
+      console.error(`[Face Crop] API error ${response.status}:`, errorText);
+      return null;
+    }
+
+    return await response.blob();
+  } catch (err) {
+    console.error('[Face Crop] Error calling face crop endpoint:', err);
+    return null;
+  }
+}
+
+export function PhotoMatchDialog({ projectId, records }: PhotoMatchDialogProps) {
+  const [open, setOpen] = useState(false);
+  const [isProcessing, setIsProcessing] = useState(false);
+  const [isUploading, setIsUploading] = useState(false);
+  const [progress, setProgress] = useState(0);
+  const [processedCount, setProcessedCount] = useState(0);
+  const [totalCount, setTotalCount] = useState(0);
+  const [error, setError] = useState<string | null>(null);
+  const [matchStats, setMatchStats] = useState({ matched: 0, unmatched: 0 });
+  const [uploadStats, setUploadStats] = useState({ uploaded: 0, failed: 0 });
+  // By default, enable matching so photos attach to the correct student records
+  const [fastMode, setFastMode] = useState(false);
+  const [removeBackground, setRemoveBackground] = useState(false);
+  const [autoCrop, setAutoCrop] = useState(false);
+  const [faceCrop, setFaceCrop] = useState(false);
+  const [faceCropPadding, setFaceCropPadding] = useState(20);
+  const [cropWidth, setCropWidth] = useState(400);
+  const [cropHeight, setCropHeight] = useState(400);
+  const matchesRef = useRef<PhotoMatch[]>([]);
+  const queryClient = useQueryClient();
+
+  // Build lookup map for O(1) matching
+  const buildRecordLookup = useCallback(() => {
+    const lookup = new Map<string, string>();
+    
+    for (const record of records) {
+      const data = record.data_json;
+      const profilePicFields = ['profilePic', 'ProfilePic', 'profile_pic', 'photo', 'Photo', 'image', 'Image', 'admNo', 'AdmNo', 'rollNo', 'RollNo'];
+      
+      for (const field of profilePicFields) {
+        if (data[field]) {
+          const key = String(data[field]).toLowerCase().trim();
+          const keyWithoutExt = key.replace(/\.[^.]+$/, '');
+          lookup.set(key, record.id);
+          lookup.set(keyWithoutExt, record.id);
+          break;
+        }
+      }
+    }
+    return lookup;
+  }, [records]);
+
+  const handleZipUpload = async (event: React.ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0];
+    if (!file) return;
+
+    if (!file.name.endsWith('.zip')) {
+      setError('Please upload a ZIP file containing photos');
+      return;
+    }
+
+    setIsProcessing(true);
+    setError(null);
+    setProgress(0);
+    setProcessedCount(0);
+    matchesRef.current = [];
+    setMatchStats({ matched: 0, unmatched: 0 });
+
+    try {
+      const startTime = performance.now();
+      const zip = new JSZip();
+      const contents = await zip.loadAsync(file);
+      
+      const imageFiles = Object.keys(contents.files).filter(filename => {
+        const ext = filename.split('.').pop()?.toLowerCase();
+        return ext && ['jpg', 'jpeg', 'png', 'webp'].includes(ext) && 
+               !filename.startsWith('__MACOSX') && !contents.files[filename].dir;
+      });
+
+      if (imageFiles.length === 0) {
+        setError('No image files found in ZIP');
+        setIsProcessing(false);
+        return;
+      }
+
+      setTotalCount(imageFiles.length);
+      const lookup = fastMode ? null : buildRecordLookup();
+      let matched = 0;
+      let unmatched = 0;
+
+      // Process all files in large parallel batches
+      for (let i = 0; i < imageFiles.length; i += PROCESS_BATCH_SIZE) {
+        const batch = imageFiles.slice(i, i + PROCESS_BATCH_SIZE);
+        
+        const batchPromises = batch.map(async (filename) => {
+          const blob = await contents.files[filename].async('blob');
+          const cleanFilename = filename.split('/').pop() || filename;
+          
+          let matchedRecordId: string | null = null;
+          if (!fastMode && lookup) {
+            const normalizedFilename = cleanFilename.toLowerCase().trim();
+            const filenameWithoutExt = normalizedFilename.replace(/\.[^.]+$/, '');
+            matchedRecordId = lookup.get(normalizedFilename) || lookup.get(filenameWithoutExt) || null;
+          }
+          
+          return { filename: cleanFilename, blob, matchedRecordId };
+        });
+
+        const batchResults = await Promise.all(batchPromises);
+        
+        for (const result of batchResults) {
+          matchesRef.current.push(result);
+          if (result.matchedRecordId) matched++;
+          else unmatched++;
+        }
+
+        setProcessedCount(Math.min(i + batch.length, imageFiles.length));
+        setProgress(Math.round((Math.min(i + batch.length, imageFiles.length) / imageFiles.length) * 100));
+        setMatchStats({ matched, unmatched });
+        
+        // Yield to UI thread periodically
+        if (i % 1000 === 0) await new Promise(r => setTimeout(r, 0));
+      }
+
+      const endTime = performance.now();
+      toast.success(`Processed ${imageFiles.length.toLocaleString()} photos in ${((endTime - startTime) / 1000).toFixed(1)}s`);
+      setIsProcessing(false);
+    } catch (err) {
+      console.error('Failed to process ZIP:', err);
+      setError('Failed to extract photos from ZIP file');
+      setIsProcessing(false);
+    }
+  };
+
+  const handleDirectUpload = async (event: React.ChangeEvent<HTMLInputElement>) => {
+    const files = event.target.files;
+    if (!files || files.length === 0) return;
+
+    setIsProcessing(true);
+    setError(null);
+    setProgress(0);
+    setProcessedCount(0);
+    matchesRef.current = [];
+    setMatchStats({ matched: 0, unmatched: 0 });
+
+    const startTime = performance.now();
+    const fileArray = Array.from(files);
+    setTotalCount(fileArray.length);
+    const lookup = fastMode ? null : buildRecordLookup();
+    let matched = 0;
+    let unmatched = 0;
+
+    // Direct file access is fast - just build the list
+    for (const file of fileArray) {
+      let matchedRecordId: string | null = null;
+      if (!fastMode && lookup) {
+        const normalizedFilename = file.name.toLowerCase().trim();
+        const filenameWithoutExt = normalizedFilename.replace(/\.[^.]+$/, '');
+        matchedRecordId = lookup.get(normalizedFilename) || lookup.get(filenameWithoutExt) || null;
+      }
+
+      matchesRef.current.push({
+        filename: file.name,
+        blob: file,
+        matchedRecordId
+      });
+
+      if (matchedRecordId) matched++;
+      else unmatched++;
+    }
+
+    setProcessedCount(fileArray.length);
+    setProgress(100);
+    setMatchStats({ matched, unmatched });
+
+    const endTime = performance.now();
+    toast.success(`Loaded ${fileArray.length.toLocaleString()} photos in ${((endTime - startTime) / 1000).toFixed(1)}s`);
+    setIsProcessing(false);
+  };
+
+  const uploadAllPhotos = async () => {
+    const photos = matchesRef.current;
+    if (photos.length === 0) {
+      toast.error('No photos to upload');
+      return;
+    }
+
+    setIsUploading(true);
+    setProgress(0);
+    setUploadStats({ uploaded: 0, failed: 0 });
+
+    const startTime = performance.now();
+    let uploaded = 0;
+    let failed = 0;
+
+    try {
+      // Step 1: Remove background if enabled
+      let processedPhotos = photos;
+      if (removeBackground) {
+        toast.loading(`Processing background removal for ${photos.length} images...`);
+        
+        // Check if rembg is configured
+        const config = getBackgroundRemovalConfig();
+        console.log('[Upload BG] Config:', config);
+        
+        if (config.provider !== 'rembg-local' && config.provider !== 'rembg-cloud') {
+          toast.error('Background removal not available. Configure rembg first.');
+          setIsUploading(false);
+          return;
+        }
+
+        // Test rembg connection
+        try {
+          const healthCheck = await fetch(`${config.apiUrl}/health`);
+          if (!healthCheck.ok) {
+            throw new Error(`Health check failed: ${healthCheck.status}`);
+          }
+          console.log('[Upload BG] Rembg service is healthy');
+        } catch (healthErr) {
+          console.error('[Upload BG] Rembg service is not responding:', healthErr);
+          toast.dismiss();
+          toast.error('Rembg microservice not running on port 5000. Background removal unavailable.');
+          setIsUploading(false);
+          return;
+        }
+
+        try {
+          console.log(`[Upload BG] Processing ${photos.length} photos...`);
+          // Process photos in batches
+          const batchResults = await removeBackgroundBatch(
+            photos.map(p => p.blob),
+            5 // 5 concurrent requests
+          );
+
+          console.log(`[Upload BG] Received ${batchResults.length} processed blobs`);
+
+          // Create index-based mapping
+          const indexToPhoto = new Map<number, typeof photos[0]>();
+          photos.forEach((photo, idx) => {
+            indexToPhoto.set(idx, photo);
+          });
+
+          processedPhotos = batchResults
+            .map(({ index, blob }) => {
+              const photo = indexToPhoto.get(index);
+              return photo ? { ...photo, blob } : null;
+            })
+            .filter(Boolean) as typeof photos;
+
+          // Also include photos that failed to process (with original blob)
+          for (let i = 0; i < photos.length; i++) {
+            if (!batchResults.some(r => r.index === i)) {
+              processedPhotos.push(photos[i]);
+            }
+          }
+
+          toast.dismiss();
+          toast.success(`Background removed from ${batchResults.length}/${photos.length} images`);
+          console.log(`[Upload BG] SUCCESS: Processed ${batchResults.length} photos`);
+          setProgress(50); // Mark halfway through
+        } catch (bgError: any) {
+          console.error('[Upload BG] Background removal error:', bgError);
+          toast.dismiss();
+          const errorMsg = bgError?.message || String(bgError);
+          toast.error(`Background removal failed: ${errorMsg}. Continuing with original images.`);
+          // Continue with original images
+          processedPhotos = photos;
+        }
+      }
+
+      // Step 2: Face crop processing (MTCNN AI detection)
+      if (faceCrop) {
+        try {
+          toast.loading('Face cropping images...');
+          console.log(`[Upload FC] Starting face crop processing on ${processedPhotos.length} photos with padding=${faceCropPadding}`);
+          
+          const faceCropPromises = processedPhotos.map((photo) =>
+            cropFacePhoto(photo.blob, faceCropPadding)
+              .then((croppedBlob) => croppedBlob || photo.blob)
+              .catch((err) => {
+                console.warn(`[Upload FC] Face crop failed for ${photo.filename}, using original:`, err);
+                return photo.blob;
+              })
+          );
+
+          const faceCroppedBlobs = await Promise.allSettled(faceCropPromises);
+          
+          processedPhotos = processedPhotos.map((photo, index) => {
+            const result = faceCroppedBlobs[index];
+            if (result.status === 'fulfilled' && result.value) {
+              return { ...photo, blob: result.value };
+            }
+            return photo;
+          });
+
+          const successCount = faceCroppedBlobs.filter(r => r.status === 'fulfilled' && r.value).length;
+          toast.dismiss();
+          toast.success(`Face crop applied to ${successCount}/${processedPhotos.length} images`);
+          console.log(`[Upload FC] SUCCESS: Face cropped ${successCount} photos`);
+          setProgress(faceCrop && removeBackground ? 66 : removeBackground ? 50 : 33);
+        } catch (fcError: any) {
+          console.error('[Upload FC] Face crop error:', fcError);
+          toast.dismiss();
+          const errorMsg = fcError?.message || String(fcError);
+          toast.error(`Face crop processing failed: ${errorMsg}. Continuing with original images.`);
+          // Continue with original images
+        }
+      }
+
+      // Step 3: Upload photos to database
+      setProgress(faceCrop && removeBackground ? 66 : removeBackground ? 50 : faceCrop ? 33 : 0);
+      
+      console.log(`[Upload] Starting database storage of ${processedPhotos.length} photos (autoCrop=${autoCrop}, faceCrop=${faceCrop})`);
+      
+      // Store photos in batches to avoid overloading the database
+      for (let i = 0; i < processedPhotos.length; i += UPLOAD_BATCH_SIZE) {
+        const batch = processedPhotos.slice(i, i + UPLOAD_BATCH_SIZE);
+        
+        const uploadPromises = batch.map(async (photo) => {
+          try {
+            // Use FormData to send photo as file (more efficient than base64)
+            const formData = new FormData();
+            formData.append('photo', photo.blob, photo.filename);
+            
+            // Build processing status based on what was applied
+            let processingStatus = 'processed';
+            if (removeBackground && faceCrop) processingStatus = 'bg_removed_face_cropped';
+            else if (removeBackground) processingStatus = 'bg_removed';
+            else if (faceCrop) processingStatus = 'face_cropped';
+            
+            formData.append('processing_status', processingStatus);
+            formData.append('projectId', projectId);
+            
+            console.log(`[Upload] Storing photo ${photo.filename} (${(photo.blob.size / 1024).toFixed(1)}KB) for record ${photo.matchedRecordId}, status: ${processingStatus}`);
+
+            // Send to backend as FormData
+            if (photo.matchedRecordId) {
+              try {
+                const response = await fetch(
+                  `http://localhost:3001/api/data-records/${photo.matchedRecordId}/upload-photo`,
+                  {
+                    method: 'POST',
+                    body: formData,
+                    // Don't set Content-Type header - browser will set it with boundary
+                  }
+                );
+
+                if (!response.ok) {
+                  const errorText = await response.text();
+                  console.error(`[Upload] Upload failed with status ${response.status}:`, errorText);
+                  throw new Error(`Upload failed: ${response.status} ${errorText}`);
+                }
+
+                const uploadResult = await response.json();
+                console.log(`[Upload] Success - photo stored for record ${photo.matchedRecordId}:`, uploadResult);
+              } catch (uploadErr: any) {
+                console.error(`[Upload] Failed to upload photo for ${photo.matchedRecordId}:`, uploadErr);
+                throw new Error(`Upload failed: ${uploadErr?.message || String(uploadErr)}`);
+              }
+            }
+
+            return { success: true };
+          } catch (err: any) {
+            console.error('[Upload] Upload failed:', err);
+            return { success: false };
+          }
+        });
+
+        const results = await Promise.all(uploadPromises);
+        
+        for (const result of results) {
+          if (result.success) uploaded++;
+          else failed++;
+        }
+
+        // Calculate progress: 50% for background removal (if enabled) + 50% for upload
+        const uploadProgress = Math.round(((i + batch.length) / processedPhotos.length) * 50);
+        setProgress((removeBackground ? 50 : 0) + uploadProgress);
+        
+        setUploadStats({ uploaded, failed });
+      }
+
+      const endTime = performance.now();
+      const duration = ((endTime - startTime) / 1000).toFixed(1);
+      const speed = Math.round(uploaded / parseFloat(duration));
+      
+      toast.success(
+        `Uploaded ${uploaded.toLocaleString()} photos${removeBackground ? ' (background removed)' : ''} in ${duration}s (${speed} photos/sec)${failed > 0 ? `, ${failed} failed` : ''}`
+      );
+      queryClient.invalidateQueries({ queryKey: ['project-records', projectId] });
+      setIsUploading(false);
+      
+      if (failed === 0) {
+        setOpen(false);
+        matchesRef.current = [];
+        setMatchStats({ matched: 0, unmatched: 0 });
+      }
+    } catch (error) {
+      console.error('Upload process error:', error);
+      toast.error('Upload process failed');
+      setIsUploading(false);
+    }
+  };
+
+  const handleClose = (isOpen: boolean) => {
+    if (!isOpen && !isProcessing && !isUploading) {
+      matchesRef.current = [];
+      setMatchStats({ matched: 0, unmatched: 0 });
+      setUploadStats({ uploaded: 0, failed: 0 });
+      setProgress(0);
+      setProcessedCount(0);
+      setTotalCount(0);
+    }
+    setOpen(isOpen);
+  };
+
+  const totalPhotos = matchesRef.current.length;
+
+  return (
+    <Dialog open={open} onOpenChange={handleClose}>
+      <DialogTrigger asChild>
+        <Button variant="outline">
+          <ImagePlus className="h-4 w-4 mr-2" />
+          Upload Photos
+        </Button>
+      </DialogTrigger>
+      <DialogContent className="max-w-2xl">
+        <DialogHeader>
+          <DialogTitle className="flex items-center gap-2">
+            <Rocket className="h-5 w-5 text-primary" />
+            Ultra-Fast Bulk Photo Upload
+          </DialogTitle>
+        </DialogHeader>
+
+        <div className="space-y-4">
+          {/* Processing Options */}
+          <div className="space-y-3 p-3 bg-muted/50 rounded-lg">
+            <p className="text-sm font-medium">Upload Options</p>
+            
+            {/* Fast Mode Toggle */}
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-2">
+                <Zap className="h-4 w-4 text-yellow-500" />
+                <Label htmlFor="fast-mode" className="text-sm">
+                  Fast Mode (skip matching)
+                </Label>
+              </div>
+              <Switch
+                id="fast-mode"
+                checked={fastMode}
+                onCheckedChange={setFastMode}
+                disabled={isProcessing || isUploading}
+              />
+            </div>
+
+            {/* Background Removal Toggle */}
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-2">
+                <Eraser className="h-4 w-4 text-blue-500" />
+                <Label htmlFor="remove-bg" className="text-sm">
+                  Remove Background (Cloudinary AI)
+                </Label>
+              </div>
+              <Switch
+                id="remove-bg"
+                checked={removeBackground}
+                onCheckedChange={setRemoveBackground}
+                disabled={isProcessing || isUploading}
+              />
+            </div>
+
+            {/* Auto Crop Toggle */}
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-2">
+                <Scissors className="h-4 w-4 text-green-500" />
+                <Label htmlFor="auto-crop" className="text-sm">
+                  Auto Crop (Square)
+                </Label>
+              </div>
+              <Switch
+                id="auto-crop"
+                checked={autoCrop}
+                onCheckedChange={setAutoCrop}
+                disabled={isProcessing || isUploading}
+              />
+            </div>
+
+            {/* Face Crop Toggle */}
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-2">
+                <Crop className="h-4 w-4 text-purple-500" />
+                <Label htmlFor="face-crop" className="text-sm">
+                  Face Crop (MTCNN AI)
+                </Label>
+              </div>
+              <Switch
+                id="face-crop"
+                checked={faceCrop}
+                onCheckedChange={setFaceCrop}
+                disabled={isProcessing || isUploading}
+              />
+            </div>
+
+            {/* Auto Crop Dimensions */}
+            {autoCrop && (
+              <div className="flex items-center gap-4 pl-6">
+                <div className="flex items-center gap-2">
+                  <Label htmlFor="crop-width" className="text-xs text-muted-foreground">W:</Label>
+                  <Input
+                    id="crop-width"
+                    type="number"
+                    value={cropWidth}
+                    onChange={(e) => setCropWidth(Number(e.target.value))}
+                    className="w-20 h-7 text-xs"
+                    disabled={isProcessing || isUploading}
+                  />
+                </div>
+                <div className="flex items-center gap-2">
+                  <Label htmlFor="crop-height" className="text-xs text-muted-foreground">H:</Label>
+                  <Input
+                    id="crop-height"
+                    type="number"
+                    value={cropHeight}
+                    onChange={(e) => setCropHeight(Number(e.target.value))}
+                    className="w-20 h-7 text-xs"
+                    disabled={isProcessing || isUploading}
+                  />
+                </div>
+                <span className="text-xs text-muted-foreground">px</span>
+              </div>
+            )}
+
+            {/* Face Crop Padding */}
+            {faceCrop && (
+              <div className="flex items-center gap-4 pl-6">
+                <div className="flex items-center gap-2">
+                  <Label htmlFor="face-padding" className="text-xs text-muted-foreground">Padding:</Label>
+                  <Input
+                    id="face-padding"
+                    type="number"
+                    value={faceCropPadding}
+                    onChange={(e) => setFaceCropPadding(Number(e.target.value))}
+                    className="w-20 h-7 text-xs"
+                    min="0"
+                    max="100"
+                    disabled={isProcessing || isUploading}
+                  />
+                </div>
+                <span className="text-xs text-muted-foreground">px</span>
+              </div>
+            )}
+          </div>
+
+          {/* Upload Area */}
+          <div className="border-2 border-dashed border-border rounded-lg p-6 text-center">
+            <div className="flex flex-col items-center gap-3">
+              <div className="p-3 bg-primary/10 rounded-full">
+                {isProcessing ? (
+                  <Loader2 className="h-6 w-6 text-primary animate-spin" />
+                ) : (
+                  <Upload className="h-6 w-6 text-primary" />
+                )}
+              </div>
+              
+              <div>
+                <p className="text-sm font-medium">Upload 10,000+ photos instantly</p>
+                <p className="text-xs text-muted-foreground">
+                  {fastMode ? 'Fast mode: Direct upload without matching' : 'Matching photos by filename'}
+                </p>
+              </div>
+
+              {(isProcessing || isUploading) && (
+                <div className="w-full max-w-sm space-y-2">
+                  <Progress value={progress} className="h-3" />
+                  <p className="text-sm font-medium text-center">
+                    {isProcessing 
+                      ? `Processing: ${processedCount.toLocaleString()} / ${totalCount.toLocaleString()}`
+                      : `Uploading: ${uploadStats.uploaded.toLocaleString()} / ${totalPhotos.toLocaleString()}`
+                    }
+                  </p>
+                  <p className="text-xs text-muted-foreground text-center">{progress}% complete</p>
+                </div>
+              )}
+
+              <div className="flex gap-2">
+                <label htmlFor="photo-zip-upload">
+                  <Button variant="default" size="sm" disabled={isProcessing || isUploading} asChild>
+                    <span>
+                      <Upload className="h-4 w-4 mr-1" />
+                      Upload ZIP
+                    </span>
+                  </Button>
+                </label>
+                <input id="photo-zip-upload" type="file" accept=".zip" onChange={handleZipUpload} className="hidden" />
+
+                <label htmlFor="photo-direct-upload">
+                  <Button variant="outline" size="sm" disabled={isProcessing || isUploading} asChild>
+                    <span>Select Photos</span>
+                  </Button>
+                </label>
+                <input id="photo-direct-upload" type="file" accept="image/*" multiple onChange={handleDirectUpload} className="hidden" />
+              </div>
+            </div>
+          </div>
+
+          {error && (
+            <Alert variant="destructive">
+              <AlertDescription>{error}</AlertDescription>
+            </Alert>
+          )}
+
+          {/* Results Summary */}
+          {totalPhotos > 0 && !isProcessing && (
+            <>
+              <div className="flex items-center justify-between p-4 bg-muted/50 rounded-lg">
+                <div className="flex items-center gap-4">
+                  <div className="text-center">
+                    <p className="text-2xl font-bold text-primary">{totalPhotos.toLocaleString()}</p>
+                    <p className="text-xs text-muted-foreground">Total Photos</p>
+                  </div>
+                  {!fastMode && (
+                    <>
+                      <div className="h-8 w-px bg-border" />
+                      <div className="flex items-center gap-2">
+                        <CheckCircle2 className="h-4 w-4 text-green-500" />
+                        <span className="text-sm">{matchStats.matched.toLocaleString()} matched</span>
+                      </div>
+                      <div className="flex items-center gap-2">
+                        <XCircle className="h-4 w-4 text-muted-foreground" />
+                        <span className="text-sm text-muted-foreground">{matchStats.unmatched.toLocaleString()} unmatched</span>
+                      </div>
+                    </>
+                  )}
+                </div>
+                {uploadStats.uploaded > 0 && (
+                  <Badge variant="secondary" className="text-green-600">
+                    {uploadStats.uploaded.toLocaleString()} Uploaded
+                  </Badge>
+                )}
+              </div>
+
+              <Button 
+                onClick={uploadAllPhotos} 
+                disabled={isUploading || totalPhotos === 0}
+                className="w-full"
+                size="lg"
+              >
+                {isUploading ? (
+                  <>
+                    <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                    Uploading... {progress}%
+                  </>
+                ) : (
+                  <>
+                    <Rocket className="h-4 w-4 mr-2" />
+                    Upload {totalPhotos.toLocaleString()} Photos
+                  </>
+                )}
+              </Button>
+            </>
+          )}
+
+          <div className="text-xs text-muted-foreground bg-muted/30 p-3 rounded-lg">
+            <p className="font-medium mb-1 flex items-center gap-1">
+              <Zap className="h-3 w-3" /> Cloudinary Upload:
+            </p>
+            <ul className="list-disc list-inside space-y-0.5">
+              <li>Photos stored on Cloudinary CDN</li>
+              <li>URLs saved to data records</li>
+              <li>10 concurrent uploads</li>
+              <li>Automatic image optimization</li>
+            </ul>
+          </div>
+        </div>
+      </DialogContent>
+    </Dialog>
+  );
+}

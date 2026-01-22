@@ -1,0 +1,72 @@
+version: '3.8'
+
+services:
+  # Redis - Message broker for BullMQ queues
+  redis:
+    image: redis:7-alpine
+    container_name: batch-processing-redis
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis-data:/data
+    command: redis-server --appendonly yes
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # Worker 1 - Face detection
+  worker-1:
+    build:
+      context: .
+      dockerfile: Dockerfile.worker
+    container_name: batch-worker-1
+    environment:
+      - REDIS_URL=redis://redis:6379
+      - WORKER_ID=worker-1
+      - WORKER_CONCURRENCY=2
+      - BATCH_OUTPUT_DIR=/app/uploads/batch-crops
+      - MYSQL_HOST=host.docker.internal
+      - MYSQL_PORT=3306
+      - MYSQL_USER=${MYSQL_USER}
+      - MYSQL_PASSWORD=${MYSQL_PASSWORD}
+      - MYSQL_DATABASE=${MYSQL_DATABASE}
+    volumes:
+      - ./uploads/batch-crops:/app/uploads/batch-crops
+      - ./uploads/batch-tmp:/app/uploads/batch-tmp
+    depends_on:
+      redis:
+        condition: service_healthy
+    restart: unless-stopped
+
+  # Worker 2 - Face detection (horizontal scaling)
+  worker-2:
+    build:
+      context: .
+      dockerfile: Dockerfile.worker
+    container_name: batch-worker-2
+    environment:
+      - REDIS_URL=redis://redis:6379
+      - WORKER_ID=worker-2
+      - WORKER_CONCURRENCY=2
+      - BATCH_OUTPUT_DIR=/app/uploads/batch-crops
+      - MYSQL_HOST=host.docker.internal
+      - MYSQL_PORT=3306
+      - MYSQL_USER=${MYSQL_USER}
+      - MYSQL_PASSWORD=${MYSQL_PASSWORD}
+      - MYSQL_DATABASE=${MYSQL_DATABASE}
+    volumes:
+      - ./uploads/batch-crops:/app/uploads/batch-crops
+      - ./uploads/batch-tmp:/app/uploads/batch-tmp
+    depends_on:
+      redis:
+        condition: service_healthy
+    restart: unless-stopped
+
+volumes:
+  redis-data:
+
+networks:
+  default:
+    name: batch-processing-network
