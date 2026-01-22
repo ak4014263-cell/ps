@@ -6,7 +6,7 @@ import tempfile
 # Add parent directory to path for imports
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', '..', 'rembg-microservice'))
 
-from school_id_processor import SchoolIDProcessor
+from school_id_processor import SchoolIDProcessor  # type: ignore[import-not-found]
 
 if __name__ == '__main__':
     if len(sys.argv) < 3:

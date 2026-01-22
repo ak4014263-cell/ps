@@ -4,6 +4,14 @@ import { pipeline, env } from '@huggingface/transformers';
 env.allowLocalModels = false;
 env.useBrowserCache = true;
 
+// Suppress ONNX Runtime warnings
+if (typeof window !== 'undefined') {
+  // @ts-ignore - suppress runtime warning logs
+  window.ort = window.ort || {};
+  window.ort.env = window.ort.env || {};
+  window.ort.env.wasm = window.ort.env.wasm || {};
+}
+
 const MAX_DIMENSION = 1024;
 
 // Passport photo size: 35mm x 45mm (Indian standard)
