@@ -7,7 +7,7 @@ import { Eraser, Download, Loader2, Crop, RotateCcw, Sun, Contrast, Palette, Cre
 import { toast } from 'sonner';
 import { apiService } from '@/lib/api';
 import { useQueryClient } from '@tanstack/react-query';
-import { cropFaceWithSCRFD } from '@/lib/faceDetection';
+
 
 interface ImagePreviewDialogProps {
   open: boolean;
@@ -355,30 +355,6 @@ export function ImagePreviewDialog({
       // Convert padding percentage to decimal (0-1 range)
       const paddingDecimal = faceCropPadding / 100;
 
-      console.log('[Face Crop] Calling cropFaceWithSCRFD with options:', {
-        padding: paddingDecimal,
-        height: 512,
-        width: 512,
-      });
-
-      const result = await cropFaceWithSCRFD(currentUrl, {
-        padding: paddingDecimal,
-        height: 512,
-        width: 512,
-      });
-
-      console.log('[Face Crop] Result from cropFaceWithSCRFD:', result);
-
-      // Get cropped image as blob
-      const croppedBlob = await (await fetch(result.croppedImageUrl)).blob();
-      URL.revokeObjectURL(result.croppedImageUrl);
-
-      if (!croppedBlob || croppedBlob.size === 0) {
-        throw new Error('Received empty cropped image from server');
-      }
-
-      console.log('[Face Crop] Got cropped blob, size:', croppedBlob.size);
-
       // Upload to backend (save-photo endpoint)
       const saveFormData = new FormData();
       const file = new File([croppedBlob], 'face_cropped.jpg', { type: 'image/jpeg' });
@@ -686,11 +662,11 @@ export function ImagePreviewDialog({
             )}
           </div>
 
-          {/* Face Crop Settings (SCRFD buffalo_l) */}
-          <div className="grid gap-3 p-4 bg-muted/20 rounded-lg">
+          {/* Face Crop Settings (SCRFD - Removed) - Hidden */}
+          <div className="grid gap-3 p-4 bg-muted/20 rounded-lg" style={{display: 'none'}}>
             <h4 className="text-sm font-medium flex items-center gap-2">
               <Crop className="h-4 w-4" />
-              Face Detection & Crop (SCRFD)
+              Face Detection & Crop (Removed)
             </h4>
             
             <div className="space-y-3">
@@ -722,7 +698,7 @@ export function ImagePreviewDialog({
                 ) : (
                   <>
                     <Crop className="h-4 w-4 mr-2" />
-                    Crop Face (SCRFD)
+                    Crop Face (Disabled)
                   </>
                 )}
               </Button>
