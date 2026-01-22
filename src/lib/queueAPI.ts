@@ -52,53 +52,6 @@ export const queueAPI = {
     return response.json();
   },
 
-  /**
-   * Queue a single face crop job
-   */
-  async queueFaceCrop(
-    recordId: string,
-    projectId: string,
-    photoUrl: string,
-    mode: 'passport' | 'idcard'
-  ) {
-    const response = await fetch(`${API_BASE}/api/image-queue/crop-face-queue`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        recordId,
-        projectId,
-        photoUrl,
-        mode,
-      }),
-    });
-
-    if (!response.ok) {
-      throw new Error(`Failed to queue face crop: ${response.statusText}`);
-    }
-
-    return response.json();
-  },
-
-  /**
-   * Queue multiple face crop jobs
-   */
-  async queueBulkFaceCrop(
-    recordIds: string[],
-    projectId: string,
-    photoUrls: string[],
-    mode: 'passport' | 'idcard'
-  ) {
-    const response = await fetch(`${API_BASE}/api/image-queue/bulk-crop-face`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        recordIds,
-        projectId,
-        photoUrls,
-        mode,
-      }),
-    });
-
     if (!response.ok) {
       throw new Error(`Failed to queue bulk face crop: ${response.statusText}`);
     }
