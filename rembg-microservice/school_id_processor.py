@@ -25,8 +25,6 @@ class SchoolIDProcessor:
         self.rembg_session = new_session("u2net")
         print("Initialization Complete.")
 
-    # Removed apply_clahe method as requested
-
     def process_id_photo(self, input_path, output_path, size=1024):
         try:
             # Load image
@@ -86,7 +84,7 @@ class SchoolIDProcessor:
                 borderValue=(255, 255, 255)
             )
 
-            # --- STEP 3: Save (Removed CLAHE call) ---
+            # --- STEP 3: Save ---
             cv2.imwrite(output_path, final_img)
             print(f"Successfully processed: {output_path}")
             return True
@@ -95,7 +93,7 @@ class SchoolIDProcessor:
             print(f"Critical error: {e}")
             return False
 
-# --- Run ---
+
 if __name__ == "__main__":
     # Ensure the directory exists
     processor = SchoolIDProcessor(model_root='/root/.insightface')
