@@ -28,7 +28,6 @@ import batchProcessingRoutes from './routes/batch-processing.js';
 import teacherLinksRoutes from './routes/teacher-links.js';
 import staffRoutes from './routes/staff.js';
 import healthRoutes from './routes/health.js';
-import schoolIdProcessorRoutes from './routes/school-id-processor.js';
 
 dotenv.config({ path: '../.env.local' });
 dotenv.config({ path: '../.env' });
@@ -131,7 +130,6 @@ setupWorkerRoutes(app);
 
 app.use('/api/teacher-links', teacherLinksRoutes);
 app.use('/api/staff', staffRoutes);
-app.use('/api/school-id', schoolIdProcessorRoutes);
 
 // ============================================================================
 // ROOT ENDPOINT

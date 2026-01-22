@@ -6,7 +6,6 @@ import { Slider } from '@/components/ui/slider';
 import { Label } from '@/components/ui/label';
 import { RotateCw } from 'lucide-react';
 import { cropImageToBlob, createPassportCrop, createIdCardCrop, CropArea } from '@/lib/cropUtils';
-import SchoolIDProcessor from './SchoolIDProcessor';
 
 export interface ImageCropDialogProps {
   open: boolean;
@@ -33,7 +32,6 @@ export function ImageCropDialog({
   const [croppedAreaPixels, setCroppedAreaPixels] = useState<CropArea | null>(null);
   const [isProcessing, setIsProcessing] = useState(false);
   const [imageDimensions, setImageDimensions] = useState<{ width: number; height: number } | null>(null);
-  const [showSchoolIDProcessor, setShowSchoolIDProcessor] = useState(false);
 
   const aspectRatio = mode === 'passport' ? 35 / 45 : 85 / 54;
 
@@ -184,49 +182,11 @@ export function ImageCropDialog({
           <Button variant="outline" onClick={onCancel} disabled={isProcessing}>
             Cancel
           </Button>
-          <Button 
-            variant="secondary"
-            onClick={() => setShowSchoolIDProcessor(true)}
-            disabled={isProcessing}
-            title="Process photo as school ID (auto background removal, face alignment)"
-          >
-            Process as School ID
-          </Button>
           <Button onClick={handleCrop} disabled={isProcessing}>
             {isProcessing ? 'Cropping...' : 'Crop & Save'}
           </Button>
         </DialogFooter>
       </DialogContent>
-      
-      {/* School ID Processor Dialog */}
-      <SchoolIDProcessor
-        open={showSchoolIDProcessor}
-        imageUrl={imageUrl}
-        onProcessComplete={(processedBase64) => {
-          // Convert base64 to blob and trigger crop complete
-          const binaryString = atob(processedBase64);
-          const bytes = new Uint8Array(binaryString.length);
-          for (let i = 0; i < binaryString.length; i++) {
-            bytes[i] = binaryString.charCodeAt(i);
-          }
-          const blob = new Blob([bytes], { type: 'image/jpeg' });
-          const dataUrl = `data:image/jpeg;base64,${processedBase64}`;
-          
-          onCropComplete({
-            blob,
-            dataUrl,
-            croppedDimensions: {
-              x: 0,
-              y: 0,
-              width: 1024,
-              height: 1024
-            }
-          });
-          setShowSchoolIDProcessor(false);
-          onCancel();
-        }}
-        onCancel={() => setShowSchoolIDProcessor(false)}
-      />
     </Dialog>
   );
 }
