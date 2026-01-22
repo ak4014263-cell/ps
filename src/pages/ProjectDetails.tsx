@@ -1186,10 +1186,6 @@ export default function ProjectDetails() {
                       <Wand2 className="mr-2 h-4 w-4" />
                       Beautify Images
                     </DropdownMenuItem>
-                    <DropdownMenuItem onClick={handleFaceCropImages}>
-                      <Crop className="mr-2 h-4 w-4" />
-                      Face Crop (AI)
-                    </DropdownMenuItem>
                     <DropdownMenuItem onClick={handleAIBackgroundRemover}>
                       <Eraser className="mr-2 h-4 w-4" />
                       Background Remover

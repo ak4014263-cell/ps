@@ -339,8 +339,6 @@ export function ImagePreviewDialog({
     }
   };
 
-  };
-
   const handleBeautify = async () => {
     const currentUrl = processedUrl || imageUrl;
     if (!currentUrl) return;
