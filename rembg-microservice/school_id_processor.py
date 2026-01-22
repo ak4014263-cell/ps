@@ -26,6 +26,10 @@ class SchoolIDProcessor:
         print("Initialization Complete.")
 
     def process_id_photo(self, input_path, output_path, size=1024):
+        """
+        Process ID photo with background removal, face detection, and alignment.
+        Returns True if successful, False otherwise.
+        """
         try:
             # Load image
             img = cv2.imread(input_path)
