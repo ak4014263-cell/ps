@@ -662,12 +662,22 @@ export const dataRecordsAPI = {
     if (options.vendor_id) params.append('vendor_id', options.vendor_id);
     if (options.order_by) params.append('order_by', options.order_by);
     if (options.order) params.append('order', options.order);
+    if (options.limit) params.append('limit', String(options.limit));
+    if (options.offset) params.append('offset', String(options.offset));
     
     const queryString = params.toString();
     const url = `${API_URL}/data-records/project/${projectId}${queryString ? '?' + queryString : ''}`;
-    const response = await fetch(url);
-    if (!response.ok) throw new Error('Failed to fetch data records');
-    return response.json();
+    try {
+      const response = await fetch(url);
+      if (!response.ok) {
+        let body = '';
+        try { body = await response.text(); } catch (e) { /* ignore */ }
+        throw new Error(`Failed to fetch data records: ${response.status} ${response.statusText} ${body}`);
+      }
+      return response.json();
+    } catch (err) {
+      throw new Error(`Failed to fetch data records from ${url}: ${err?.message || err}`);
+    }
   },
 
   async getByVendor(vendorId, options = {}) {
@@ -676,6 +686,8 @@ export const dataRecordsAPI = {
     if (options.group_id) params.append('group_id', options.group_id);
     if (options.order_by) params.append('order_by', options.order_by);
     if (options.order) params.append('order', options.order);
+    if (options.limit) params.append('limit', String(options.limit));
+    if (options.offset) params.append('offset', String(options.offset));
     
     const queryString = params.toString();
     const url = `${API_URL}/data-records/vendor/${vendorId}${queryString ? '?' + queryString : ''}`;

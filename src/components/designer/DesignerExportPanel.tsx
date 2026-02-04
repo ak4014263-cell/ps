@@ -181,9 +181,9 @@ export function DesignerExportPanel({
           Export
         </Button>
       </DialogTrigger>
-      <DialogContent className="max-w-md">
+      <DialogContent className="max-w-md bg-card text-foreground border-border">
         <DialogHeader>
-          <DialogTitle className="flex items-center gap-2">
+          <DialogTitle className="flex items-center gap-2 text-foreground">
             <Download className="h-5 w-5" />
             Export Template
           </DialogTitle>

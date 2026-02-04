@@ -39,6 +39,10 @@ interface Template {
   template_data?: any;
   is_active?: number | boolean;
   created_at?: string;
+  category?: string;
+  width_mm?: number;
+  height_mm?: number;
+  name?: string;
 }
 
 interface ProjectTemplateManagerProps {
@@ -252,8 +256,8 @@ export function ProjectTemplateManager({ vendorId, projectId }: ProjectTemplateM
     const is13x19 = width === 330 && height === 482;
     
     setFormData({
-      name: template.template_name || 'Untitled',
-      category: template.template_type || 'design',
+      name: template.template_name || template.name || template.template_data?.template_name || 'Untitled',
+      category: template.category || template.template_type || 'design',
       pageFormat: isA4 ? 'a4' : is13x19 ? '13x19' : 'custom',
       customWidth: width || 85.6,
       customHeight: height || 54,
@@ -302,10 +306,10 @@ export function ProjectTemplateManager({ vendorId, projectId }: ProjectTemplateM
       ) : (
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
           {templates.map((template) => {
-            const width = template.template_data?.width_mm || 0;
-            const height = template.template_data?.height_mm || 0;
-            const name = template.template_name || 'Untitled';
-            const category = template.template_type || 'design';
+            const width = template.template_data?.width_mm || template.width_mm || 0;
+            const height = template.template_data?.height_mm || template.height_mm || 0;
+            const name = template.template_name || template.name || template.template_data?.template_name || 'Untitled';
+            const category = template.category || template.template_type || 'design';
             return (
             <Card key={template.id} className="overflow-hidden">
               <div className="aspect-video bg-muted flex items-center justify-center relative">

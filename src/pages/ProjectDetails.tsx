@@ -70,6 +70,8 @@ import { Label } from '@/components/ui/label';
 import { ProjectGroupsManager } from '@/components/project/ProjectGroupsManager';
 import { ProjectTemplateManager } from '@/components/project/ProjectTemplateManager';
 import { GeneratePreviewDialog } from '@/components/project/GeneratePreviewDialog';
+import { ProjectPDFGenerator } from '@/components/project/ProjectPDFGenerator';
+import { BatchDataRecordsPDFGenerator } from '@/components/project/BatchDataRecordsPDFGenerator';
 import { PDFGenerator } from '@/components/pdf/PDFGenerator';
 import { AddDataDialog } from '@/components/project/AddDataDialog';
 import { DataRecordsTable } from '@/components/project/DataRecordsTable';
@@ -96,7 +98,7 @@ function ProjectTasksTab({ projectId, vendorId }: { projectId: string; vendorId?
   const { data: tasks = [], isLoading } = useQuery({
     queryKey: ['project-tasks-tab', projectId],
     queryFn: async () => {
-      const { data, error } = await supabase
+      const { data, error } = await (supabase as any)
         .from('project_tasks')
         .select('*')
         .eq('project_id', projectId)
@@ -114,7 +116,7 @@ function ProjectTasksTab({ projectId, vendorId }: { projectId: string; vendorId?
     queryFn: async () => {
       if (!vendorId) return [];
       // First get vendor staff
-      const { data: staffData, error } = await supabase
+      const { data: staffData, error } = await (supabase as any)
         .from('vendor_staff')
         .select('user_id, role')
         .eq('vendor_id', vendorId)
@@ -124,7 +126,7 @@ function ProjectTasksTab({ projectId, vendorId }: { projectId: string; vendorId?
       
       // Then get profiles for those users
       const userIds = staffData.map(s => s.user_id);
-      const { data: profiles, error: profileError } = await supabase
+      const { data: profiles, error: profileError } = await (supabase as any)
         .from('profiles')
         .select('id, full_name')
         .in('id', userIds);
@@ -144,7 +146,7 @@ function ProjectTasksTab({ projectId, vendorId }: { projectId: string; vendorId?
 
   const addTaskMutation = useMutation({
     mutationFn: async (taskData: typeof newTask) => {
-      const { error } = await supabase
+      const { error } = await (supabase as any)
         .from('project_tasks')
         .insert({
           project_id: projectId,
@@ -169,7 +171,7 @@ function ProjectTasksTab({ projectId, vendorId }: { projectId: string; vendorId?
   });
 
   const updateTaskStatus = async (taskId: string, status: string) => {
-    const { error } = await supabase
+    const { error } = await (supabase as any)
       .from('project_tasks')
       .update({ 
         status,
@@ -186,7 +188,7 @@ function ProjectTasksTab({ projectId, vendorId }: { projectId: string; vendorId?
   };
 
   const deleteTask = async (taskId: string) => {
-    const { error } = await supabase
+    const { error } = await (supabase as any)
       .from('project_tasks')
       .delete()
       .eq('id', taskId);
@@ -354,7 +356,7 @@ function ProjectFilesTab({ projectId }: { projectId: string }) {
   const { data: files = [], isLoading, refetch } = useQuery({
     queryKey: ['project-files-cloudinary', projectId],
     queryFn: async () => {
-      const { data, error } = await supabase
+      const { data, error } = await (supabase as any)
         .from('project_files')
         .select('*')
         .eq('project_id', projectId)
@@ -384,7 +386,7 @@ function ProjectFilesTab({ projectId }: { projectId: string }) {
         });
 
         // Save metadata to database
-        const { error: dbError } = await supabase
+        const { error: dbError } = await (supabase as any)
           .from('project_files')
           .insert({
             project_id: projectId,
@@ -420,7 +422,7 @@ function ProjectFilesTab({ projectId }: { projectId: string }) {
       await deleteFromCloudinary(publicId);
 
       // Delete from database
-      const { error } = await supabase
+      const { error } = await (supabase as any)
         .from('project_files')
         .delete()
         .eq('id', fileId);
@@ -558,15 +560,25 @@ export default function ProjectDetails() {
     queryFn: async () => {
       if (!project?.vendor_id) return [];
       
-      // Only select columns needed for display, excluding heavy design_json columns
-      const { data, error } = await supabase
-        .from('templates')
-        .select('id, name, category, width_mm, height_mm, is_public, vendor_id, thumbnail_url, created_at, has_back_side')
-        .or(`vendor_id.eq.${project.vendor_id},is_public.eq.true`)
-        .order('created_at', { ascending: false });
-
-      if (error) throw error;
-      return data;
+      try {
+        // Use the templatesAPI to fetch templates
+        const { templatesAPI } = await import('@/lib/api');
+        const allTemplates = await templatesAPI.getByVendor(project.vendor_id);
+        
+        // Also get public templates
+        const publicTemplates = await templatesAPI.getAll();
+        const publicFiltered = publicTemplates.filter(t => t.is_public);
+        
+        // Combine and remove duplicates
+        const combined = [...allTemplates, ...publicFiltered];
+        const unique = Array.from(new Map(combined.map(t => [t.id, t])).values());
+        
+        // Sort by created_at descending
+        return unique.sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime());
+      } catch (error) {
+        console.error('Failed to fetch templates:', error);
+        return [];
+      }
     },
     enabled: !!project?.vendor_id,
   });
@@ -683,14 +695,14 @@ export default function ProjectDetails() {
             
             const { data: uploadData } = await supabase.storage
               .from('project-photos')
-              .upload(fileName, beautifiedBlob, { upsert: true });
+              .upload(fileName, beautifiedBlob, { contentType: 'image/jpeg', upsert: true });
 
             if (uploadData) {
               const { data: { publicUrl } } = supabase.storage
                 .from('project-photos')
                 .getPublicUrl(fileName);
 
-              await supabase
+              await (supabase as any)
                 .from('data_records')
                 .update({
                   photo_url: publicUrl,
@@ -749,14 +761,14 @@ export default function ProjectDetails() {
             
             const { data: uploadData } = await supabase.storage
               .from('project-photos')
-              .upload(fileName, blob, { upsert: true });
+              .upload(fileName, blob, { contentType: 'image/png', upsert: true });
 
             if (uploadData) {
               const { data: { publicUrl } } = supabase.storage
                 .from('project-photos')
                 .getPublicUrl(fileName);
 
-              await supabase
+              await (supabase as any)
                 .from('data_records')
                 .update({
                   background_removed: true,
@@ -930,7 +942,7 @@ export default function ProjectDetails() {
 
     try {
       for (const record of recordsToProcess) {
-        await supabase
+        await (supabase as any)
           .from('data_records')
           .update({
             photo_url: record.original_photo_url,
@@ -970,7 +982,7 @@ export default function ProjectDetails() {
         const fileName = `${projectId}/${Date.now()}_${file.name}`;
         const { data, error } = await supabase.storage
           .from('project-photos')
-          .upload(fileName, file);
+          .upload(fileName, file, { contentType: file.type || 'application/octet-stream', upsert: true });
 
         if (!error && data) {
           uploaded++;
@@ -1113,16 +1125,49 @@ export default function ProjectDetails() {
                 <h2 className="text-xl font-semibold">Templates & Groups</h2>
                 <p className="text-sm text-muted-foreground">Manage templates and assign them to groups</p>
               </div>
-              <GeneratePreviewDialog 
-                projectId={projectId!}
-                vendorId={project.vendor_id}
-                groups={project.groups?.map(g => ({ 
-                  id: g.id, 
-                  name: g.name, 
-                  template_id: g.template_id,
-                  record_count: g.record_count || 0
-                })) || []}
-              />
+              <div className="flex gap-2">
+                <BatchDataRecordsPDFGenerator
+                  projectId={projectId!}
+                  projectName={project.name}
+                  vendorId={project.vendor_id}
+                  groups={project.groups?.map(g => ({
+                    id: g.id,
+                    name: g.name,
+                    template_id: g.template_id,
+                    record_count: g.record_count || 0
+                  })) || []}
+                  templates={templates.map(t => ({
+                    id: t.id,
+                    name: t.name,
+                    category: t.category,
+                    design_json: t.design_json,
+                    width_mm: t.width_mm,
+                    height_mm: t.height_mm
+                  }))}
+                />
+                <ProjectPDFGenerator
+                  projectId={projectId!}
+                  projectName={project.name}
+                  vendorId={project.vendor_id}
+                  groups={project.groups?.map(g => ({
+                    id: g.id,
+                    name: g.name,
+                    template_id: g.template_id,
+                    record_count: g.record_count || 0
+                  })) || []}
+                  templates={templates}
+                />
+                <GeneratePreviewDialog 
+                  projectId={projectId!}
+                  vendorId={project.vendor_id}
+                  groups={project.groups?.map(g => ({ 
+                    id: g.id, 
+                    name: g.name, 
+                    template_id: g.template_id,
+                    record_count: g.record_count || 0
+                  })) || []}
+                />
+              </div>
             </div>
             
             <ProjectTemplateManager 

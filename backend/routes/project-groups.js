@@ -214,31 +214,55 @@ router.get('/', async (req, res) => {
   try {
     const { project_id, vendor_id } = req.query;
 
-    let query = 'SELECT * FROM project_groups';
+    let query = `
+      SELECT pg.*, 
+             (SELECT COUNT(*) FROM data_records WHERE group_id = pg.id) as calculated_record_count,
+             t.id as template_id, t.name as template_name, t.design_json
+      FROM project_groups pg
+      LEFT JOIN templates t ON pg.template_id = t.id
+    `;
     const params = [];
 
     if (project_id) {
-      query += ' WHERE project_id = ?';
+      query += ' WHERE pg.project_id = ?';
       params.push(project_id);
     }
 
+    query += ' ORDER BY pg.created_at DESC';
+
     const groups = await getAll(query, params);
 
+    // Format the response and update record_count in response if calculated differs
+    let formattedGroups = groups.map(group => ({
+      id: group.id,
+      project_id: group.project_id,
+      name: group.name,
+      template_id: group.template_id,
+      record_count: group.calculated_record_count || 0, // Use dynamically calculated count
+      template: group.template_id ? {
+        id: group.template_id,
+        name: group.template_name,
+        design_json: group.design_json
+      } : null
+    }));
+
     // If vendor_id is provided, filter by vendor
-    let filteredGroups = groups;
     if (vendor_id) {
-      filteredGroups = [];
-      for (const group of groups) {
+      const filteredGroups = [];
+      for (const group of formattedGroups) {
         const project = await getOne('SELECT vendor_id FROM projects WHERE id = ?', [group.project_id]);
         if (project && project.vendor_id === vendor_id) {
           filteredGroups.push(group);
         }
       }
+      formattedGroups = filteredGroups;
     }
+
+    console.log(`[GET-GROUPS] Found ${formattedGroups.length} groups with calculated record counts`);
 
     res.json({
       success: true,
-      data: filteredGroups
+      data: formattedGroups
     });
   } catch (error) {
     console.error('Get groups error:', error);

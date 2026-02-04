@@ -211,13 +211,8 @@ export function AdvancedTemplateDesigner({ editTemplate, onBack, projectId, proj
     queryKey: ['vendor', user?.id],
     queryFn: async () => {
       if (!user?.id) return null;
-      const { data, error } = await supabase
-        .from('vendors')
-        .select('id')
-        .eq('user_id', user.id)
-        .maybeSingle();
-      if (error) throw error;
-      return data;
+      const vendors = await apiService.vendorsAPI.getAll();
+      return vendors.find((v: any) => v.user_id === user.id);
     },
     enabled: !!user?.id,
   });
@@ -226,12 +221,15 @@ export function AdvancedTemplateDesigner({ editTemplate, onBack, projectId, proj
   const { data: libraryShapes = [] } = useQuery({
     queryKey: ['library-shapes-for-designer', vendorData?.id],
     queryFn: async () => {
-      const { data, error } = await supabase
-        .from('library_shapes')
-        .select('id, name, shape_url, is_public, vendor_id')
-        .order('created_at', { ascending: false });
-      if (error) throw error;
-      return data || [];
+      if (!vendorData?.id) return [];
+      try {
+        const response = await fetch(`http://localhost:3001/api/library-shapes?vendor_id=${vendorData.id}`);
+        if (!response.ok) return [];
+        return response.json();
+      } catch (error) {
+        console.error('Failed to fetch library shapes:', error);
+        return [];
+      }
     },
     enabled: !!vendorData?.id,
   });
@@ -670,8 +668,10 @@ export function AdvancedTemplateDesigner({ editTemplate, onBack, projectId, proj
       const canvasWidth = fabricCanvas.width || 0;
       const canvasHeight = fabricCanvas.height || 0;
 
-      // Textboxes: convert scaling to width in real-time (prevents stretching) and clamp to canvas.
-      if (obj.type === 'textbox') {
+      // Textboxes: Only convert scaling to width for textboxes inside variable-box containers
+      // Regular text variables and other textboxes should resize freely
+      // This condition checks if the textbox is NOT a child of a variable-box (i.e., not variable-text)
+      if (obj.type === 'textbox' && obj.data?.type !== 'variable-text' && obj.data?.type !== 'variable-box') {
         const minWidth = 50;
         const scaledWidth = (obj.width || 100) * (obj.scaleX || 1);
         const nextWidth = Math.max(minWidth, Math.min(scaledWidth, canvasWidth));
@@ -712,13 +712,74 @@ export function AdvancedTemplateDesigner({ editTemplate, onBack, projectId, proj
         return;
       }
 
+      // For regular text variables: allow free resizing with boundary constraints
+      if (obj.type === 'textbox' && (obj.data?.type === 'variable' || obj.data?.type === 'text')) {
+        // Simply clamp position to canvas bounds, allow scale/size to change freely
+        const boundingRect = obj.getBoundingRect(true, true);
+        const objLeft = boundingRect.left;
+        const objTop = boundingRect.top;
+        const objRight = boundingRect.left + boundingRect.width;
+        const objBottom = boundingRect.top + boundingRect.height;
+
+        let needsUpdate = false;
+
+        // Constrain left edge
+        if (objLeft < 0) {
+          obj.set({ left: (obj.left || 0) - objLeft });
+          needsUpdate = true;
+        }
+
+        // Constrain right edge
+        if (objRight > canvasWidth) {
+          const maxWidth = canvasWidth - Math.max(0, objLeft);
+          const scaleX = Math.min(obj.scaleX || 1, maxWidth / (obj.width || 1));
+          obj.set({ scaleX });
+          needsUpdate = true;
+        }
+
+        // Constrain top edge
+        if (objTop < 0) {
+          obj.set({ top: (obj.top || 0) - objTop });
+          needsUpdate = true;
+        }
+
+        // Constrain bottom edge
+        if (objBottom > canvasHeight) {
+          const maxHeight = canvasHeight - Math.max(0, objTop);
+          const scaleY = Math.min(obj.scaleY || 1, maxHeight / (obj.height || 1));
+          obj.set({ scaleY });
+          needsUpdate = true;
+        }
+
+        if (needsUpdate) {
+          obj.setCoords();
+        }
+        return;
+      }
+
       // Variable boxes: update their inner text area in real-time while scaling
       if (obj.data?.type === 'variable-box') {
         const padding = obj.data?.padding ?? 8;
         const baseWidth = obj.width || obj.data?.boxWidth || 100;
         const baseHeight = obj.height || obj.data?.boxHeight || 30;
+        
+        // Calculate new dimensions from scaling
         const currentWidth = baseWidth * (obj.scaleX || 1);
         const currentHeight = baseHeight * (obj.scaleY || 1);
+        
+        // Ensure minimum size
+        const minWidth = 40;
+        const minHeight = 20;
+        const constrainedWidth = Math.max(minWidth, currentWidth);
+        const constrainedHeight = Math.max(minHeight, currentHeight);
+        
+        // Apply the constrained dimensions directly to avoid scaling issues
+        obj.set({
+          width: constrainedWidth,
+          height: constrainedHeight,
+          scaleX: 1,
+          scaleY: 1,
+        });
 
         // Find the associated text object (prefer stored ref)
         let textObj: any = obj.data?.textObject;
@@ -727,17 +788,49 @@ export function AdvancedTemplateDesigner({ editTemplate, onBack, projectId, proj
         }
 
         if (textObj) {
-          const textWidth = Math.max(currentWidth - padding * 2, 20);
-          const textHeight = Math.max(currentHeight - padding * 2, (textObj.data?.originalFontSize || 14));
+          const textWidth = Math.max(constrainedWidth - padding * 2, 20);
+          const textHeight = Math.max(constrainedHeight - padding * 2, (textObj.data?.originalFontSize || 14));
           textObj.set({
             left: (obj.left || 0) + padding,
             top: (obj.top || 0) + padding,
             width: textWidth,
             height: textHeight,
+            // Ensure word wrapping is enabled for constrained width
+            breakWords: true,
           });
+          // Update clipping path to match new dimensions
+          if ((textObj as any).clipPath) {
+            (textObj as any).clipPath.set({
+              width: textWidth,
+              height: textHeight,
+            });
+          }
         }
 
-        // Keep scaling live (don't normalize here) but ensure bounds
+        // Constrain box within canvas bounds
+        let rect = obj.getBoundingRect(true, true);
+        
+        if (rect.left < 0) {
+          obj.set({ left: (obj.left || 0) - rect.left });
+        }
+        
+        rect = obj.getBoundingRect(true, true);
+        if (rect.left + rect.width > canvasWidth) {
+          const overflowX = rect.left + rect.width - canvasWidth;
+          obj.set({ left: (obj.left || 0) - overflowX });
+        }
+        
+        rect = obj.getBoundingRect(true, true);
+        if (rect.top < 0) {
+          obj.set({ top: (obj.top || 0) - rect.top });
+        }
+        
+        rect = obj.getBoundingRect(true, true);
+        if (rect.top + rect.height > canvasHeight) {
+          const overflowY = rect.top + rect.height - canvasHeight;
+          obj.set({ top: (obj.top || 0) - overflowY });
+        }
+        
         obj.setCoords();
         fabricCanvas.requestRenderAll();
         return;
@@ -795,9 +888,9 @@ export function AdvancedTemplateDesigner({ editTemplate, onBack, projectId, proj
 
       let changed = false;
 
-      // For textbox objects, convert scaling to width change
-      // This prevents text from stretching and allows proper word wrap
-      if (obj.type === 'textbox' && (obj.scaleX !== 1 || obj.scaleY !== 1)) {
+      // For non-variable textbox objects, convert scaling to width change
+      // Regular text variables and variable-text should keep their scale for free resizing
+      if (obj.type === 'textbox' && obj.data?.type !== 'variable' && obj.data?.type !== 'variable-text' && obj.data?.type !== 'variable-box' && (obj.scaleX !== 1 || obj.scaleY !== 1)) {
         const minWidth = 50;
         const newWidth = Math.max(minWidth, (obj.width || 100) * (obj.scaleX || 1));
 
@@ -810,8 +903,8 @@ export function AdvancedTemplateDesigner({ editTemplate, onBack, projectId, proj
         changed = true;
       }
 
-      // Final safety clamp for textboxes (ensures right edge can't end outside canvas)
-      if (obj.type === 'textbox') {
+      // Final safety clamp for non-variable textboxes (ensures right edge can't end outside canvas)
+      if (obj.type === 'textbox' && obj.data?.type !== 'variable-text' && obj.data?.type !== 'variable-box') {
         obj.setCoords();
         let rect = obj.getBoundingRect(true, true);
 
@@ -848,48 +941,19 @@ export function AdvancedTemplateDesigner({ editTemplate, onBack, projectId, proj
 
       // Normalize variable-box dimensions after scaling/modification
       if (obj?.data?.type === 'variable-box') {
-        const scaleX = obj.scaleX || 1;
-        const scaleY = obj.scaleY || 1;
-        if (scaleX !== 1 || scaleY !== 1) {
-          const baseWidth = obj.width || obj.data?.boxWidth || 100;
-          const baseHeight = obj.height || obj.data?.boxHeight || 30;
-          const newWidth = Math.max(20, baseWidth * scaleX);
-          const newHeight = Math.max(20, baseHeight * scaleY);
+        // Store the new dimensions in data for persistence
+        const width = obj.width || 100;
+        const height = obj.height || 30;
+        
+        obj.set('data', {
+          ...obj.data,
+          boxWidth: width,
+          boxHeight: height,
+        });
 
-          obj.set({
-            width: newWidth,
-            height: newHeight,
-            scaleX: 1,
-            scaleY: 1,
-          });
-
-          obj.set('data', {
-            ...obj.data,
-            boxWidth: newWidth,
-            boxHeight: newHeight,
-          });
-
-          // Update associated text object
-          let textObj: any = obj.data?.textObject;
-          if (!textObj) {
-            textObj = fabricCanvas.getObjects().find((o: any) => o?.data?.type === 'variable-text' && o?.data?.field === obj.data?.field);
-          }
-          if (textObj) {
-            const padding = obj.data?.padding ?? 8;
-            const textWidth = Math.max(newWidth - padding * 2, 20);
-            const textHeight = Math.max(newHeight - padding * 2, (textObj.data?.originalFontSize || 14));
-            textObj.set({
-              left: (obj.left || 0) + padding,
-              top: (obj.top || 0) + padding,
-              width: textWidth,
-              height: textHeight,
-            });
-          }
-
-          obj.setCoords();
-          fabricCanvas.requestRenderAll();
-          try { if (!isHistoryActionRef.current) saveToHistory(); } catch (e) { /* ignore */ }
-        }
+        obj.setCoords();
+        fabricCanvas.requestRenderAll();
+        try { if (!isHistoryActionRef.current) saveToHistory(); } catch (e) { /* ignore */ }
       }
     };
     
@@ -1472,8 +1536,44 @@ export function AdvancedTemplateDesigner({ editTemplate, onBack, projectId, proj
       ? Math.min(zoom * 1.2, 3) 
       : Math.max(zoom / 1.2, 0.25);
     setZoom(newZoom);
-    // Use CSS transform for zoom - no canvas resizing needed for crisp rendering
-  }, [zoom]);
+    
+    // Ensure background objects are properly constrained after zoom change
+    if (activeCanvas) {
+      const bgImage = activeCanvas.getObjects().find((obj: any) => obj.data?.isBackground);
+      const bgGradient = activeCanvas.getObjects().find((obj: any) => obj.data?.isGradientBackground);
+      
+      const canvasWidth = widthMm * mmToPixels;
+      const canvasHeight = heightMm * mmToPixels;
+      
+      // Re-constrain background image if it exists
+      if (bgImage) {
+        bgImage.set({
+          left: 0,
+          top: 0,
+          width: canvasWidth,
+          height: canvasHeight,
+        });
+        if (bgImage.width && bgImage.height) {
+          const scaleX = canvasWidth / bgImage.width;
+          const scaleY = canvasHeight / bgImage.height;
+          bgImage.scaleX = scaleX;
+          bgImage.scaleY = scaleY;
+        }
+      }
+      
+      // Re-constrain gradient background if it exists
+      if (bgGradient) {
+        bgGradient.set({
+          left: 0,
+          top: 0,
+          width: canvasWidth,
+          height: canvasHeight,
+        });
+      }
+      
+      activeCanvas.requestRenderAll();
+    }
+  }, [zoom, activeCanvas, widthMm, heightMm]);
 
   /**
    * Add geometric shape to canvas
@@ -1646,11 +1746,8 @@ export function AdvancedTemplateDesigner({ editTemplate, onBack, projectId, proj
     const originalText = text;
     const variableName = text.replace(/[{}]/g, '');
     
-    // Determine display text - if we have preview data, apply it
-    let displayText = text;
-    if (Object.keys(previewData).length > 0 && previewData[variableName]) {
-      displayText = String(previewData[variableName]);
-    }
+    // Determine display text - ALWAYS use original field name, never preview data for boxes
+    let displayText = originalText; // Always show original placeholder like {{firstName}}
     
     // Calculate box dimensions
     const padding = 8;
@@ -1674,8 +1771,8 @@ export function AdvancedTemplateDesigner({ editTemplate, onBack, projectId, proj
         scaleY: 1,
       });
 
-      existingBox.set('data', {
-        ...existingBox.data,
+      (existingBox as any).set('data', {
+        ...(existingBox as any).data,
         boxWidth: newWidth,
         boxHeight: newHeight,
         padding,
@@ -1691,9 +1788,17 @@ export function AdvancedTemplateDesigner({ editTemplate, onBack, projectId, proj
           top: (existingBox.top || 0) + padding,
           width: textWidth,
           height: textHeight,
+          breakWords: true,
         });
-        existingText.data = {
-          ...existingText.data,
+        // Update clipping path
+        if ((existingText as any).clipPath) {
+          (existingText as any).clipPath.set({
+            width: textWidth,
+            height: textHeight,
+          });
+        }
+        (existingText as any).data = {
+          ...(existingText as any).data,
           parentBox: existingBox,
           padding,
         };
@@ -1740,14 +1845,15 @@ export function AdvancedTemplateDesigner({ editTemplate, onBack, projectId, proj
       fontFamily,
       fill,
       fontWeight: 'normal',
-      editable: true,
+      editable: false, // Not directly editable, box is the container
       width: boxWidth - padding * 2,
       height: boxHeight - padding * 2,
       backgroundColor: 'transparent',
-      stroke: '',
+      stroke: '', // No border
       strokeWidth: 0,
       padding: 0,
-      splitByGrapheme: true, // Enable word wrapping
+      splitByGrapheme: false, // Disable char-by-char for better wrapping
+      breakWords: true, // Enable word wrapping to fit within width
       lineHeight: 1.2,
       textAlign: 'left',
       lockMovementX: true, // Prevent text from being moved independently
@@ -1757,6 +1863,15 @@ export function AdvancedTemplateDesigner({ editTemplate, onBack, projectId, proj
       lockScalingY: true,
       selectable: false, // Text is not independently selectable
       evented: false, // Text doesn't handle events, box does
+      hasControls: false, // No resize handles on text
+      hasBorders: false, // No border around text box
+      clipPath: new Rect({
+        left: 0,
+        top: 0,
+        width: boxWidth - padding * 2,
+        height: boxHeight - padding * 2,
+        absolutePositioned: true,
+      }), // Clip text to box boundaries
       data: {
         type: 'variable-text',
         field: variableName,
@@ -1769,8 +1884,8 @@ export function AdvancedTemplateDesigner({ editTemplate, onBack, projectId, proj
     });
 
     // Link textbox reference back to box data for easy lookup
-    boxRect.data = {
-      ...boxRect.data,
+    (boxRect as any).data = {
+      ...(boxRect as any).data,
       textObject: textbox,
     };
     
@@ -1806,7 +1921,7 @@ export function AdvancedTemplateDesigner({ editTemplate, onBack, projectId, proj
     
     // Helper function to update text position and size based on box
     const updateTextInBox = () => {
-      const currentPadding = boxRect.data?.padding || padding;
+      const currentPadding = (boxRect as any).data?.padding || padding;
       const currentWidth = (boxRect.width || boxWidth) * (boxRect.scaleX || 1);
       const currentHeight = (boxRect.height || boxHeight) * (boxRect.scaleY || 1);
       const textWidth = Math.max(currentWidth - currentPadding * 2, 20);
@@ -1817,7 +1932,16 @@ export function AdvancedTemplateDesigner({ editTemplate, onBack, projectId, proj
         top: (boxRect.top || 0) + currentPadding,
         width: textWidth,
         height: textHeight,
+        breakWords: true, // Ensure word wrapping
       });
+      
+      // Update clipping path to ensure text doesn't overflow
+      if ((textbox as any).clipPath) {
+        (textbox as any).clipPath.set({
+          width: textWidth,
+          height: textHeight,
+        });
+      }
     };
     
     // When box is moved, move text with it
@@ -1833,7 +1957,7 @@ export function AdvancedTemplateDesigner({ editTemplate, onBack, projectId, proj
     });
     
     // When box scaling is complete, normalize dimensions and update text
-    boxRect.on('scaled', () => {
+    (boxRect as any).on('modified', () => {
       const scaleX = boxRect.scaleX || 1;
       const scaleY = boxRect.scaleY || 1;
       
@@ -1850,8 +1974,8 @@ export function AdvancedTemplateDesigner({ editTemplate, onBack, projectId, proj
       });
       
       // Update stored dimensions in data
-      boxRect.set('data', {
-        ...boxRect.data,
+      (boxRect as any).set('data', {
+        ...(boxRect as any).data,
         boxWidth: newWidth,
         boxHeight: newHeight,
       });
@@ -1863,7 +1987,7 @@ export function AdvancedTemplateDesigner({ editTemplate, onBack, projectId, proj
     });
     
     // When box is modified (moved, scaled, etc.), save to history
-    boxRect.on('modified', () => {
+    (boxRect as any).on('modified', () => {
       // Ensure text stays within box after any modification
       updateTextInBox();
       activeCanvas.requestRenderAll();
@@ -2709,6 +2833,11 @@ export function AdvancedTemplateDesigner({ editTemplate, onBack, projectId, proj
         hasBorders: false,
         lockMovementX: true,
         lockMovementY: true,
+        lockRotation: true,
+        lockScalingX: true,
+        lockScalingY: true,
+        excludeFromExport: false,
+        absolutePositioned: true, // Ensure it stays at (0,0) regardless of zoom
         data: { isGradientBackground: true },
       });
       
@@ -2759,8 +2888,21 @@ export function AdvancedTemplateDesigner({ editTemplate, onBack, projectId, proj
           hasBorders: false,
           lockMovementX: true,
           lockMovementY: true,
+          lockRotation: true,
+          lockScalingX: true,
+          lockScalingY: true,
+          excludeFromExport: false,
+          absolutePositioned: true, // Ensure it stays at (0,0) regardless of zoom
           data: { isBackground: true },
         });
+        
+        // Ensure image doesn't exceed canvas bounds
+        if (img.width! * img.scaleX! > canvasWidth) {
+          img.scaleX = canvasWidth / img.width!;
+        }
+        if (img.height! * img.scaleY! > canvasHeight) {
+          img.scaleY = canvasHeight / img.height!;
+        }
         
         // Remove existing background image
         const existingBg = activeCanvas.getObjects().find((obj: any) => obj.data?.isBackground);
@@ -3277,22 +3419,22 @@ export function AdvancedTemplateDesigner({ editTemplate, onBack, projectId, proj
           
           if (textObj) {
             // Store original text if not already stored
-            if (!textObj.data) textObj.data = {};
-            if (!textObj.data.originalText) {
-              textObj.data.originalText = textObj.text;
+            if (!(textObj as any).data) (textObj as any).data = {};
+            if (!(textObj as any).data.originalText) {
+              (textObj as any).data.originalText = (textObj as any).text;
             }
-            if (!textObj.data.originalFontSize) {
-              textObj.data.originalFontSize = textObj.fontSize;
+            if (!(textObj as any).data.originalFontSize) {
+              (textObj as any).data.originalFontSize = (textObj as any).fontSize;
             }
             
             let displayText = String(data[fieldName]);
             
             // Apply text case transformation if set
-            if (textObj.data?.textCase === 'uppercase') {
+            if ((textObj as any).data?.textCase === 'uppercase') {
               displayText = displayText.toUpperCase();
-            } else if (textObj.data?.textCase === 'lowercase') {
+            } else if ((textObj as any).data?.textCase === 'lowercase') {
               displayText = displayText.toLowerCase();
-            } else if (textObj.data?.textCase === 'capitalize') {
+            } else if ((textObj as any).data?.textCase === 'capitalize') {
               displayText = displayText.split(' ').map((w: string) => 
                 w.charAt(0).toUpperCase() + w.slice(1).toLowerCase()
               ).join(' ');
@@ -3376,14 +3518,14 @@ export function AdvancedTemplateDesigner({ editTemplate, onBack, projectId, proj
           o.data?.parentBox === obj
         );
         
-        if (textObj && textObj.data?.originalText) {
-          textObj.set('text', textObj.data.originalText);
+        if (textObj && (textObj as any).data?.originalText) {
+          textObj.set('text', (textObj as any).data.originalText);
           // Restore original font size if it was changed
-          if (textObj.data.originalFontSize) {
-            textObj.set('fontSize', textObj.data.originalFontSize);
+          if ((textObj as any).data.originalFontSize) {
+            textObj.set('fontSize', (textObj as any).data.originalFontSize);
           }
         }
-      } else if (obj.type === 'textbox' && obj.data?.originalText) {
+      } else if (obj.type === 'textbox' && (obj as any).data?.originalText) {
         // Handle regular variable text fields
         obj.set('text', obj.data.originalText);
         // Restore original font size if auto font size was used
@@ -4115,9 +4257,9 @@ export function AdvancedTemplateDesigner({ editTemplate, onBack, projectId, proj
 
       {/* Settings Dialog */}
       <Dialog open={settingsOpen} onOpenChange={setSettingsOpen}>
-        <DialogContent>
+        <DialogContent className="bg-card text-foreground border-border">
           <DialogHeader>
-            <DialogTitle>Template Settings</DialogTitle>
+            <DialogTitle className="text-foreground">Template Settings</DialogTitle>
           </DialogHeader>
           <div className="space-y-4 py-4">
             <div className="space-y-2">
@@ -4309,10 +4451,11 @@ export function AdvancedTemplateDesigner({ editTemplate, onBack, projectId, proj
                 ref={containerRef}
                 className="flex items-center justify-center p-12"
                 style={{
-                  minWidth: `calc(${widthMm * mmToPixels * zoom}px + 150px)`,
-                  minHeight: `calc(${heightMm * mmToPixels * zoom}px + 150px)`,
+                  minWidth: `calc(${widthMm * mmToPixels}px * ${zoom} + 150px)`,
+                  minHeight: `calc(${heightMm * mmToPixels}px * ${zoom} + 150px)`,
                   backgroundImage: showGrid ? `radial-gradient(circle, hsl(var(--muted-foreground) / 0.15) 1px, transparent 1px)` : 'none',
-                  backgroundSize: `${gridSize * zoom}px ${gridSize * zoom}px`,
+                  backgroundSize: `${gridSize}px ${gridSize}px`,
+                  backgroundAttachment: 'local',
                 }}
                 onDragOver={(e) => {
                   e.preventDefault();
@@ -4364,19 +4507,48 @@ export function AdvancedTemplateDesigner({ editTemplate, onBack, projectId, proj
                   <div 
                     className="relative shadow-2xl rounded-lg overflow-hidden border border-border"
                     style={{
+                      width: widthMm * mmToPixels,
+                      height: heightMm * mmToPixels,
                       transform: `scale(${zoom})`,
                       transformOrigin: 'top left',
                       willChange: 'transform',
-                      imageRendering: 'crisp-edges',
+                      imageRendering: '-webkit-optimize-contrast',
                       backfaceVisibility: 'hidden',
-                    }}
+                      perspective: '1000px',
+                      WebkitFontSmoothing: 'antialiased',
+                      MozOsxFontSmoothing: 'grayscale',
+                      isolation: 'isolate', // Create new stacking context to prevent rendering issues
+                      contain: 'layout style paint', // Optimize rendering and prevent overflow
+                    } as React.CSSProperties}
                   >
-                    <div style={{ display: activeSide === 'front' ? 'block' : 'none' }}>
-                      <canvas ref={canvasRef} style={{ imageRendering: 'crisp-edges' }} />
+                    <div style={{ 
+                      display: activeSide === 'front' ? 'block' : 'none',
+                      width: '100%',
+                      height: '100%',
+                      overflow: 'hidden',
+                    }}>
+                      <canvas ref={canvasRef} style={{ 
+                        display: 'block',
+                        width: '100%',
+                        height: '100%',
+                        imageRendering: '-webkit-optimize-contrast',
+                        backfaceVisibility: 'hidden',
+                      }} />
                     </div>
                     {hasBackSide && (
-                      <div style={{ display: activeSide === 'back' ? 'block' : 'none' }}>
-                        <canvas ref={backCanvasRef} style={{ imageRendering: 'crisp-edges' }} />
+                      <div style={{ 
+                        display: activeSide === 'back' ? 'block' : 'none',
+                        width: '100%',
+                        height: '100%',
+                        overflow: 'hidden',
+                      }}>
+                        <canvas ref={backCanvasRef} style={{ 
+                          display: 'block',
+                          width: '100%',
+                          height: '100%',
+                          imageRendering: '-webkit-optimize-contrast',
+                          backfaceVisibility: 'hidden',
+                        }} />
                       </div>
                     )}
                   </div>
@@ -4397,7 +4569,45 @@ export function AdvancedTemplateDesigner({ editTemplate, onBack, projectId, proj
             onZoomIn={() => handleZoom('in')}
             onZoomOut={() => handleZoom('out')}
             onZoomReset={() => setZoom(1)}
-            onZoomChange={(newZoom) => setZoom(newZoom)}
+            onZoomChange={(newZoom) => {
+              setZoom(newZoom);
+              // Ensure background objects are properly constrained after zoom change
+              if (activeCanvas) {
+                const bgImage = activeCanvas.getObjects().find((obj: any) => obj.data?.isBackground);
+                const bgGradient = activeCanvas.getObjects().find((obj: any) => obj.data?.isGradientBackground);
+                
+                const canvasWidth = widthMm * mmToPixels;
+                const canvasHeight = heightMm * mmToPixels;
+                
+                // Re-constrain background image if it exists
+                if (bgImage) {
+                  bgImage.set({
+                    left: 0,
+                    top: 0,
+                    width: canvasWidth,
+                    height: canvasHeight,
+                  });
+                  if (bgImage.width && bgImage.height) {
+                    const scaleX = canvasWidth / bgImage.width;
+                    const scaleY = canvasHeight / bgImage.height;
+                    bgImage.scaleX = scaleX;
+                    bgImage.scaleY = scaleY;
+                  }
+                }
+                
+                // Re-constrain gradient background if it exists
+                if (bgGradient) {
+                  bgGradient.set({
+                    left: 0,
+                    top: 0,
+                    width: canvasWidth,
+                    height: canvasHeight,
+                  });
+                }
+                
+                activeCanvas.requestRenderAll();
+              }
+            }}
             showGrid={showGrid}
             onToggleGrid={() => setShowGrid(!showGrid)}
             isPreviewMode={isPreviewMode}

@@ -185,6 +185,7 @@ router.get('/', async (req, res) => {
       data: projects,
     });
   } catch (error) {
+    console.error('Get project by id error:', error);
     res.status(500).json({
       success: false,
       error: error.message,
@@ -208,17 +209,46 @@ router.get('/:id', async (req, res) => {
       });
     }
 
-    // Fetch groups for this project
-    const groups = await getAll(
-      'SELECT * FROM project_groups WHERE project_id = ? ORDER BY created_at DESC',
-      [id]
-    );
+    // Fetch groups for this project including calculated record counts and template info
+    const groupsQuery = `
+      SELECT pg.*, 
+             (SELECT COUNT(*) FROM data_records WHERE group_id = pg.id) as calculated_record_count,
+             t.id as template_id, t.template_name as template_name, t.template_data as template_data
+      FROM project_groups pg
+      LEFT JOIN templates t ON pg.template_id = t.id
+      WHERE pg.project_id = ?
+      ORDER BY pg.created_at DESC
+    `;
+
+    const groupsRaw = await getAll(groupsQuery, [id]);
+
+    const groups = (groupsRaw || []).map(g => ({
+      id: g.id,
+      project_id: g.project_id,
+      name: g.name,
+      template_id: g.template_id,
+      record_count: g.calculated_record_count || 0,
+      template: g.template_id ? (() => {
+        // try to parse template_data if present
+        let parsed = null;
+        if (g.template_data) {
+          try { parsed = typeof g.template_data === 'string' ? JSON.parse(g.template_data) : g.template_data; } catch (e) { parsed = null; }
+        }
+        const tplName = g.template_name || (parsed && (parsed.template_name || parsed.name)) || null;
+        const designJson = (parsed && (parsed.design_json || parsed.back_design_json)) || null;
+        return {
+          id: g.template_id,
+          name: tplName,
+          design_json: designJson
+        };
+      })() : null
+    }));
 
     res.json({
       success: true,
       data: {
         ...project,
-        groups: groups || []
+        groups
       },
     });
   } catch (error) {

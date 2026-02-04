@@ -249,7 +249,14 @@ router.get('/project/:projectId', async (req, res) => {
       });
     }
 
-    let query = 'SELECT * FROM data_records WHERE project_id = ?';
+    // 🔥 OPTIMIZATION: Select specific columns and exclude large blobs
+    const columnsToSelect = `
+      id, project_id, vendor_id, group_id, record_number, data_json,
+      photo_url, cropped_photo_url, original_photo_url, cloudinary_public_id,
+      processing_status, background_removed, face_detected, face_crop_coordinates,
+      processing_error, created_at, updated_at
+    `;
+    let query = `SELECT ${columnsToSelect} FROM data_records WHERE project_id = ?`;
     const params = [projectId];
 
     // Filter by vendor_id if provided (additional security layer)
@@ -271,6 +278,19 @@ router.get('/project/:projectId', async (req, res) => {
       query += ` ORDER BY ${order_by} ${order.toUpperCase()}`;
     } else {
       query += ' ORDER BY record_number ASC';
+    }
+
+    // Support pagination: optional `limit` and `offset` query params
+    const limit = parseInt(req.query.limit) || null;
+    const offset = parseInt(req.query.offset) || null;
+
+    if (limit && Number.isFinite(limit) && limit > 0) {
+      query += ' LIMIT ?';
+      params.push(limit);
+      if (offset && Number.isFinite(offset) && offset >= 0) {
+        query += ' OFFSET ?';
+        params.push(offset);
+      }
     }
 
     const records = await getAll(query, params);
@@ -330,6 +350,19 @@ router.get('/vendor/:vendorId', async (req, res) => {
       query += ` ORDER BY ${order_by} ${order.toUpperCase()}`;
     } else {
       query += ' ORDER BY record_number ASC';
+    }
+
+    // Support pagination here as well
+    const limit = parseInt(req.query.limit) || null;
+    const offset = parseInt(req.query.offset) || null;
+
+    if (limit && Number.isFinite(limit) && limit > 0) {
+      query += ' LIMIT ?';
+      params.push(limit);
+      if (offset && Number.isFinite(offset) && offset >= 0) {
+        query += ' OFFSET ?';
+        params.push(offset);
+      }
     }
 
     const records = await getAll(query, params);
@@ -419,6 +452,21 @@ router.put('/:id', async (req, res) => {
     const { id } = req.params;
     const updates = req.body;
 
+    console.log(`\n[UPDATE START] Record ID: ${id}`);
+    console.log(`[UPDATE] Requested updates:`, updates);
+
+    // First verify the record exists
+    const existingRecord = await getOne('SELECT id, group_id FROM data_records WHERE id = ?', [id]);
+    if (!existingRecord) {
+      console.log(`[UPDATE] ERROR: Record ${id} not found`);
+      return res.status(404).json({
+        success: false,
+        error: 'Record not found'
+      });
+    }
+
+    console.log(`[UPDATE] Found existing record. Current group_id: ${existingRecord.group_id}`);
+
     const fields = [];
     const values = [];
     
@@ -450,17 +498,67 @@ router.put('/:id', async (req, res) => {
 
     values.push(id);
 
-    await execute(
-      `UPDATE data_records SET ${fields.join(', ')}, updated_at = NOW() WHERE id = ?`,
-      values
-    );
+    const sql = `UPDATE data_records SET ${fields.join(', ')}, updated_at = NOW() WHERE id = ?`;
+    console.log(`[UPDATE] SQL: ${sql}`);
+    console.log(`[UPDATE] Values:`, values);
+
+    const result = await execute(sql, values);
+
+    console.log(`[UPDATE] Query result:`, result);
+    console.log(`[UPDATE] Affected rows: ${result.affectedRows}, Changed rows: ${result.changedRows}`);
+
+    if (result.affectedRows === 0) {
+      console.log(`[UPDATE] WARNING: Update query affected 0 rows`);
+    }
+
+    // If group_id was updated, refresh record counts for both old and new groups
+    if ('group_id' in updates) {
+      console.log(`[UPDATE] Group ID changed, updating record counts...`);
+      
+      const oldRecord = existingRecord;
+      const newGroupId = updates.group_id;
+      const oldGroupId = oldRecord.group_id;
+
+      // Update old group count (if it had one)
+      if (oldGroupId) {
+        await execute(
+          `UPDATE project_groups SET record_count = (SELECT COUNT(*) FROM data_records WHERE group_id = ?) WHERE id = ?`,
+          [oldGroupId, oldGroupId]
+        );
+        console.log(`[UPDATE] Updated record_count for old group ${oldGroupId}`);
+      }
+
+      // Update new group count (if assigned to one)
+      if (newGroupId) {
+        await execute(
+          `UPDATE project_groups SET record_count = (SELECT COUNT(*) FROM data_records WHERE group_id = ?) WHERE id = ?`,
+          [newGroupId, newGroupId]
+        );
+        console.log(`[UPDATE] Updated record_count for new group ${newGroupId}`);
+      }
+    }
+
+    // Verify the update worked by fetching the record again
+    const updatedRecord = await getOne('SELECT * FROM data_records WHERE id = ?', [id]);
+
+    if (!updatedRecord) {
+      console.log(`[UPDATE] ERROR: Could not fetch updated record`);
+      return res.status(500).json({
+        success: false,
+        error: 'Update failed - record not found after update'
+      });
+    }
+
+    console.log(`[UPDATE] SUCCESS. New group_id: ${updatedRecord.group_id}`);
+    console.log(`[UPDATE END]\n`);
 
     res.json({
       success: true,
-      message: 'Data record updated successfully'
+      message: 'Data record updated successfully',
+      data: updatedRecord
     });
   } catch (error) {
-    console.error('Update data record error:', error);
+    console.error(`[UPDATE] EXCEPTION for record ${req.params.id}:`, error);
     res.status(500).json({
       success: false,
       error: error.message

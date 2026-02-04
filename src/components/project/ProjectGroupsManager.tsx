@@ -35,12 +35,22 @@ export function ProjectGroupsManager({ projectId, groups }: ProjectGroupsManager
   const [selectedTemplateId, setSelectedTemplateId] = useState<string>('');
   const queryClient = useQueryClient();
 
-  const { data: templates = [] } = useQuery({
+  const { data: templates = [], isLoading: templatesLoading } = useQuery({
     queryKey: ['templates'],
     queryFn: async () => {
-      const response = await apiService.templatesAPI.getAll();
-      return response?.data || response || [];
+      try {
+        console.log('[ProjectGroupsManager] Fetching templates...');
+        const response = await apiService.templatesAPI.getAll();
+        console.log('[ProjectGroupsManager] Templates response:', response);
+        const templatesData = response?.data || response || [];
+        console.log('[ProjectGroupsManager] Loaded templates:', templatesData.length);
+        return templatesData;
+      } catch (error) {
+        console.error('[ProjectGroupsManager] Error fetching templates:', error);
+        return [];
+      }
     },
+    staleTime: 0,
   });
 
   const createGroupMutation = useMutation({
@@ -137,9 +147,13 @@ export function ProjectGroupsManager({ projectId, groups }: ProjectGroupsManager
               </div>
               <div className="space-y-2">
                 <Label htmlFor="template">Assign Template (Optional)</Label>
-                <Select value={selectedTemplateId || '__none__'} onValueChange={(val) => setSelectedTemplateId(val === '__none__' ? '' : val)}>
+                <Select 
+                  value={selectedTemplateId || '__none__'} 
+                  onValueChange={(val) => setSelectedTemplateId(val === '__none__' ? '' : val)}
+                  disabled={templatesLoading}
+                >
                   <SelectTrigger>
-                    <SelectValue placeholder="Select a template" />
+                    <SelectValue placeholder={templatesLoading ? "Loading templates..." : "Select a template"} />
                   </SelectTrigger>
                   <SelectContent>
                     <SelectItem value="__none__">No template</SelectItem>
@@ -150,6 +164,9 @@ export function ProjectGroupsManager({ projectId, groups }: ProjectGroupsManager
                     ))}
                   </SelectContent>
                 </Select>
+                {templates.length === 0 && !templatesLoading && (
+                  <p className="text-xs text-yellow-600">No templates available. Create templates first.</p>
+                )}
               </div>
               <Button 
                 className="w-full" 
@@ -201,7 +218,15 @@ export function ProjectGroupsManager({ projectId, groups }: ProjectGroupsManager
                 
                 <div className="flex items-center justify-between text-sm text-muted-foreground">
                   <span>{group.record_count || 0} records</span>
-                  {group.template && <span className="text-xs">{group.template.name}</span>}
+                  {group.template ? (
+                    <span className="text-xs bg-green-100 text-green-800 px-2 py-1 rounded">
+                      ✓ {group.template.name}
+                    </span>
+                  ) : (
+                    <span className="text-xs bg-red-100 text-red-800 px-2 py-1 rounded">
+                      No template
+                    </span>
+                  )}
                 </div>
                 
                 <div className="space-y-2">

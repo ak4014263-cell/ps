@@ -6,6 +6,7 @@ import { Badge } from '@/components/ui/badge';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Separator } from '@/components/ui/separator';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
+import { TextboxInputDialog } from './TextboxInputDialog';
 import {
   Type, Square, Circle, Triangle, Star, Minus, Image, QrCode, Barcode,
   User, Phone, Mail, Calendar, MapPin, CreditCard,
@@ -111,6 +112,7 @@ export function DesignerElementsPanel({
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [photoPopoverOpen, setPhotoPopoverOpen] = useState<string | null>(null);
   const [variableMode, setVariableMode] = useState<'text' | 'box'>('text');
+  const [textboxDialogOpen, setTextboxDialogOpen] = useState(false);
 
   const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
@@ -123,6 +125,11 @@ export function DesignerElementsPanel({
   const handleAddPhotoWithShape = (shape: PhotoShape) => {
     onAddPlaceholder('photo', shape);
     setPhotoPopoverOpen(null);
+  };
+
+  const handleTextboxConfirm = (text: string, isVariable: boolean, asBox: boolean) => {
+    onAddText(text, isVariable, asBox);
+    setTextboxDialogOpen(false);
   };
 
   const handleVariableClick = (field: typeof VARIABLE_FIELDS[0]) => {
@@ -255,6 +262,14 @@ export function DesignerElementsPanel({
                 >
                   <Type className="h-3 w-3 mr-2" />
                   <span className="text-sm">Add Body Text</span>
+                </Button>
+                <Button
+                  variant="default"
+                  className="w-full justify-start h-10 bg-blue-600 hover:bg-blue-700"
+                  onClick={() => setTextboxDialogOpen(true)}
+                >
+                  <Type className="h-4 w-4 mr-2" />
+                  <span className="text-sm font-medium">Add Custom Text</span>
                 </Button>
               </div>
 
@@ -463,6 +478,13 @@ export function DesignerElementsPanel({
           </Tabs>
         </div>
       </ScrollArea>
+
+      {/* Textbox Input Dialog */}
+      <TextboxInputDialog
+        open={textboxDialogOpen}
+        onOpenChange={setTextboxDialogOpen}
+        onConfirm={handleTextboxConfirm}
+      />
     </div>
   );
 }

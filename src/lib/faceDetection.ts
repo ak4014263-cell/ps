@@ -62,7 +62,7 @@ export async function initFaceDetector() {
   return initPromise;
 }
 
-export async function detectAndCropFace(imageUrl: string, options?: { mode?: 'passport' | 'idcard'; outputWidth?: number; outputHeight?: number }): Promise<{
+export async function detectAndCropFace(imageUrl: string, options?: { mode?: 'passport' | 'idcard'; outputWidth?: number; outputHeight?: number; headroom?: number }): Promise<{
   croppedImageUrl: string;
   coordinates: { x: number; y: number; width: number; height: number };
 }> {
@@ -147,7 +147,10 @@ export async function detectAndCropFace(imageUrl: string, options?: { mode?: 'pa
             cropWidth = cropHeight * targetAspect;
 
             cropX = detectionCenterX - cropWidth / 2;
-            cropY = detectionCenterY - cropHeight / 2.5; // Bias towards head
+            // Bias towards head with headroom adjustment (0% = centered, 50% = top-aligned)
+            const headroomPercent = (options?.headroom ?? 0) / 100;
+            const headBias = 2.5 - headroomPercent * 1.5; // Range: 2.5 (0%) to 1.0 (50%)
+            cropY = detectionCenterY - cropHeight / headBias;
 
             // Clamp to canvas bounds
             cropX = Math.max(0, Math.min(cropX, width - cropWidth));
@@ -193,7 +196,10 @@ export async function detectAndCropFace(imageUrl: string, options?: { mode?: 'pa
           }
 
           cropX = (width - cropWidth) / 2;
-          cropY = (height - cropHeight) / 2 - height * 0.1; // Slight bias towards top
+          // Apply headroom to fallback crop (0% = centered, 50% = top-aligned)
+          const headroomPercent = (options?.headroom ?? 0) / 100;
+          const topBias = 0.1 + headroomPercent * 0.2; // Range: 0.1 (0%) to 0.2 (50%)
+          cropY = (height - cropHeight) / 2 - height * topBias;
         }
 
         // Create output canvas

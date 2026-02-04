@@ -224,25 +224,57 @@ export function DataRecordsTable({ records, projectId, groups = [], onEditRecord
   };
 
   const handleAssignGroup = async (groupId: string) => {
-    if (selectedIds.size === 0) return;
+    if (selectedIds.size === 0) {
+      toast.error('Please select records first');
+      return;
+    }
+
     try {
       const recordIds = Array.from(selectedIds);
       const newGroupId = groupId === 'none' ? null : groupId;
       
+      console.log(`[AssignGroup] Starting: ${recordIds.length} records to group "${newGroupId}"`);
+      
       // Update records with new group via backend API
-      await Promise.all(
+      const results = await Promise.allSettled(
         recordIds.map(id =>
           apiService.dataRecordsAPI.update(id, { group_id: newGroupId })
         )
       );
+
+      // Check results
+      const fulfilled = results.filter(r => r.status === 'fulfilled');
+      const failed = results.filter(r => r.status === 'rejected');
       
-      toast.success('Group assigned successfully');
+      console.log(`[AssignGroup] Results: ${fulfilled.length} success, ${failed.length} failed`);
+      
+      if (fulfilled.length > 0) {
+        // Verify at least one update worked by checking the response data
+        const successfulUpdates = fulfilled.map(r => r.value?.data?.group_id);
+        console.log(`[AssignGroup] Successfully updated records with group_id:`, successfulUpdates);
+        
+        if (!successfulUpdates.includes(newGroupId)) {
+          console.warn(`[AssignGroup] WARNING: Response shows group_id mismatch`);
+        }
+      }
+      
+      if (failed.length > 0) {
+        console.error('[AssignGroup] Failed updates:', failed.map(r => r.reason));
+        toast.error(`Failed to assign ${failed.length}/${recordIds.length} records`);
+        return;
+      }
+      
+      toast.success(`✓ ${recordIds.length} records assigned to group`);
       setSelectedIds(new Set());
-      queryClient.invalidateQueries({ queryKey: ['project-records', projectId] });
-      queryClient.invalidateQueries({ queryKey: ['project', projectId] });
+      
+      // Force a hard refresh
+      console.log('[AssignGroup] Invalidating queries...');
+      queryClient.invalidateQueries({ queryKey: ['project-records', projectId], exact: true });
+      queryClient.invalidateQueries({ queryKey: ['project', projectId], exact: true });
+      
     } catch (error) {
-      console.error('Error assigning group:', error);
-      toast.error('Failed to assign group');
+      console.error('[AssignGroup] Exception:', error);
+      toast.error('Failed to assign group: ' + (error instanceof Error ? error.message : 'Unknown error'));
     }
   };
 
@@ -822,11 +854,18 @@ export function DataRecordsTable({ records, projectId, groups = [], onEditRecord
                       <SelectValue placeholder="All Groups" />
                     </SelectTrigger>
                     <SelectContent>
-                      <SelectItem value="all">All Groups</SelectItem>
-                      <SelectItem value="unassigned">Unassigned</SelectItem>
-                      {groups.map(group => (
-                        <SelectItem key={group.id} value={group.id}>{group.name}</SelectItem>
-                      ))}
+                      <SelectItem value="all">All Groups ({records.length})</SelectItem>
+                      <SelectItem value="unassigned">
+                        Unassigned ({records.filter(r => !r.group_id).length})
+                      </SelectItem>
+                      {groups.map(group => {
+                        const groupRecordCount = records.filter(r => r.group_id === group.id).length;
+                        return (
+                          <SelectItem key={group.id} value={group.id}>
+                            {group.name} ({groupRecordCount})
+                          </SelectItem>
+                        );
+                      })}
                     </SelectContent>
                   </Select>
                 </div>

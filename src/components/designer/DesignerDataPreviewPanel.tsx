@@ -93,6 +93,7 @@ export function DesignerDataPreviewPanel({
 }: DesignerDataPreviewPanelProps) {
   const [sampleData, setSampleData] = useState<Record<string, string>>(DEFAULT_SAMPLE_DATA);
   const [customJson, setCustomJson] = useState<string>('');
+  const [photoHeadroom, setPhotoHeadroom] = useState(0); // Headroom control for image preview
   const [activeTab, setActiveTab] = useState<'fields' | 'json' | 'import' | 'database' | 'client'>('fields');
   const [importedRecords, setImportedRecords] = useState<Record<string, string>[]>([]);
   const [currentRecordIndex, setCurrentRecordIndex] = useState(0);
@@ -282,8 +283,9 @@ export function DesignerDataPreviewPanel({
     if (activeTab === 'json') {
       try {
         const parsed = JSON.parse(customJson);
+        const dataWithHeadroom = { ...parsed, __photoHeadroom: photoHeadroom };
         setSampleData(parsed);
-        onPreviewData(parsed);
+        onPreviewData(dataWithHeadroom);
         toast.success('Preview data applied');
       } catch (e) {
         toast.error('Invalid JSON format');
@@ -295,6 +297,7 @@ export function DesignerDataPreviewPanel({
         photo: record.photo_url || record.cropped_photo_url || '',
         photo_url: record.photo_url || '',
         cropped_photo_url: record.cropped_photo_url || '',
+        __photoHeadroom: photoHeadroom,
       };
       setSampleData(recordData);
       onPreviewData(recordData);
@@ -303,12 +306,14 @@ export function DesignerDataPreviewPanel({
       const client = clients.find(c => c.id === selectedClientId);
       if (client) {
         const clientData = mapClientToPreviewData(client);
+        const dataWithHeadroom = { ...clientData, __photoHeadroom: photoHeadroom };
         setSampleData(clientData);
-        onPreviewData(clientData);
+        onPreviewData(dataWithHeadroom);
         toast.success('Client data applied');
       }
     } else {
-      onPreviewData(sampleData);
+      const dataWithHeadroom = { ...sampleData, __photoHeadroom: photoHeadroom };
+      onPreviewData(dataWithHeadroom);
       toast.success('Preview data applied');
     }
   };
@@ -432,17 +437,39 @@ export function DesignerDataPreviewPanel({
 
             <TabsContent value="fields" className="mt-3 space-y-3">
               {relevantFields.length > 0 ? (
-                relevantFields.map(field => (
-                  <div key={field} className="space-y-1">
-                    <Label className="text-xs">{field}</Label>
-                    <Input
-                      value={sampleData[field] || ''}
-                      onChange={(e) => handleFieldChange(field, e.target.value)}
-                      placeholder={`Enter ${field}`}
-                      className="h-8 text-sm"
+                <>
+                  {relevantFields.map(field => (
+                    <div key={field} className="space-y-1">
+                      <Label className="text-xs">{field}</Label>
+                      <Input
+                        value={sampleData[field] || ''}
+                        onChange={(e) => handleFieldChange(field, e.target.value)}
+                        placeholder={`Enter ${field}`}
+                        className="h-8 text-sm"
+                      />
+                    </div>
+                  ))}
+                  
+                  <Separator />
+                  
+                  {/* Face Crop Headroom Control */}
+                  <div className="space-y-2 pt-2">
+                    <Label className="text-xs font-medium">Face Crop Headroom: {photoHeadroom}%</Label>
+                    <p className="text-xs text-muted-foreground">0% = centered, 50% = top-aligned</p>
+                    <input
+                      type="range"
+                      min="0"
+                      max="50"
+                      value={photoHeadroom}
+                      onChange={(e) => setPhotoHeadroom(parseInt(e.target.value))}
+                      className="w-full h-2 bg-muted rounded-lg appearance-none cursor-pointer"
                     />
+                    <div className="flex justify-between text-[10px] text-muted-foreground">
+                      <span>Centered</span>
+                      <span>Top-Aligned</span>
+                    </div>
                   </div>
-                ))
+                </>
               ) : (
                 <p className="text-xs text-muted-foreground text-center py-4">
                   Add variable text fields to see them here
@@ -724,7 +751,7 @@ export function DesignerDataPreviewPanel({
                 value={customJson || JSON.stringify(sampleData, null, 2)}
                 onChange={(e) => setCustomJson(e.target.value)}
                 placeholder='{"name": "John Doe", ...}'
-                className="min-h-[200px] font-mono text-xs"
+                className="min-h-[200px] font-mono text-xs bg-background text-foreground border-border"
               />
               <Button variant="outline" size="sm" className="w-full" onClick={handleLoadFromJson}>
                 Load from JSON

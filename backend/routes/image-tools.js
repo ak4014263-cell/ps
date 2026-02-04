@@ -27,12 +27,31 @@ const storage = multer.diskStorage({
   }
 });
 
-// Multer upload middleware
+// Multer upload middleware (generic, for most image endpoints)
 const upload = multer({ 
   storage,
   limits: { fileSize: 50 * 1024 * 1024 }, // 50MB limit
   fileFilter: (req, file, cb) => {
     console.log(`[Multer] File filter check: name=${file.originalname}, mimetype=${file.mimetype}`);
+    const mime = file.mimetype || '';
+    const isImage = mime.startsWith('image/') || mime === 'application/octet-stream';
+    const hasImageExt = /\.(jpg|jpeg|png|gif|webp|bmp)$/i.test(file.originalname);
+    
+    if (isImage || hasImageExt || !mime) {
+      cb(null, true);
+    } else {
+      cb(new Error(`File type not allowed: ${mime}`), false);
+    }
+  }
+});
+
+// Separate multer instance for face-crop (accepts mixed file and form data)
+const faceCropUpload = multer({
+  storage,
+  limits: { fileSize: 50 * 1024 * 1024 },
+  fileFilter: (req, file, cb) => {
+    console.log(`[FaceCropUpload] Processing file: ${file.fieldname} (${file.originalname})`);
+    // Accept image files only
     const mime = file.mimetype || '';
     const isImage = mime.startsWith('image/') || mime === 'application/octet-stream';
     const hasImageExt = /\.(jpg|jpeg|png|gif|webp|bmp)$/i.test(file.originalname);
@@ -83,8 +102,9 @@ router.post('/beautify', upload.single('image'), async (req, res) => {
 
     // Get beautification strength (0-1, default 0.7)
     const strength = Math.min(1.0, Math.max(0.0, parseFloat(req.body.strength || req.query.strength || '0.7')));
+    const mode = req.body.mode || req.query.mode || 'default';  // Beautify mode
 
-    // Build python args for beautify with strength
+    // Build python args for beautify with strength and mode
     const python = process.env.PYTHON_PATH || 'python';
     const script = path.join(__dirname, '..', 'tools', 'beautify.py');
 
@@ -93,9 +113,9 @@ router.post('/beautify', upload.single('image'), async (req, res) => {
       return res.status(500).json({ success: false, error: 'Beautification service not available' });
     }
 
-    const args = [script, inputPath, outputPath, String(strength)];
+    const args = [script, inputPath, outputPath, String(strength), mode];
 
-    console.log('[Beautify] Using AI beautification with strength:', strength);
+    console.log('[Beautify] Using AI beautification with strength:', strength, 'mode:', mode);
     console.log('[Beautify] Running:', python, args.join(' '));
 
     const proc = spawn(python, args, { 
@@ -264,7 +284,24 @@ router.post('/save-photo', async (req, res) => {
         blobColumn = 'original_photo_blob';
         urlColumn = 'original_photo_url';
         photoFileName = `original_${recordId}_${Date.now()}.jpg`;
+      } else if (photoType === 'beautified') {
+        // Beautified images overwrite the main photo_url (they are enhanced versions of the current photo)
+        blobColumn = 'photo_blob';
+        urlColumn = 'photo_url';
+        photoFileName = `beautified_${recordId}_${Date.now()}.jpg`;
       }
+
+      // Create project-specific directory for storing actual files on disk
+      const projectPhotosDir = path.join(UPLOADS_DIR, 'project-photos', projectId);
+      if (!fs.existsSync(projectPhotosDir)) {
+        fs.mkdirSync(projectPhotosDir, { recursive: true });
+        console.log(`[Save Photo] Created project directory: ${projectPhotosDir}`);
+      }
+
+      // Save actual file to disk in project-specific directory
+      const filePathOnDisk = path.join(projectPhotosDir, photoFileName);
+      fs.writeFileSync(filePathOnDisk, fileBuffer);
+      console.log(`[Save Photo] Saved file to disk: ${filePathOnDisk}`);
 
       // Save both BLOB (for database) and filename (for URL)
       const sql = `UPDATE data_records SET ${blobColumn} = ?, ${urlColumn} = ? WHERE id = ?`;
@@ -283,7 +320,7 @@ router.post('/save-photo', async (req, res) => {
         url: publicUrl,
         photoUrl: publicUrl,
         photoType: photoType,
-        message: 'Photo saved to database'
+        message: 'Photo saved to database and disk'
       });
     } catch (error) {
       console.error('[Save Photo] Processing error:', error);
@@ -348,26 +385,83 @@ router.get('/get-photo/:recordId', async (req, res) => {
 /**
  * POST /api/image/face-crop
  * Process image as school ID photo (background removal + face detection + alignment)
+ * Accepts: image file (required), logo file (optional), bg_color, glow, logo_pos (optional text params)
  */
-router.post('/face-crop', upload.single('image'), async (req, res) => {
+router.post('/face-crop', (req, res, next) => {
+  faceCropUpload.any()(req, res, (err) => {
+    if (err) {
+      console.error('[Face Crop] Multer error:', err.message);
+      return res.status(400).json({ success: false, error: `Upload error: ${err.message}` });
+    }
+    next();
+  });
+}, async (req, res) => {
   try {
-    if (!req.file) {
+    // Log received data for debugging
+    console.log(`[Face Crop] Request received:`);
+    console.log(`  - req.files:`, req.files ? `${req.files.length} file(s)` : 'none');
+    if (req.files && Array.isArray(req.files)) {
+      req.files.forEach((f, i) => {
+        console.log(`    [${i}] fieldname=${f.fieldname}, filename=${f.filename}, size=${f.size}`);
+      });
+    }
+    console.log(`  - req.body keys:`, Object.keys(req.body || {}));
+
+    // Find the image file from req.files
+    const imageFile = req.files && req.files.find(f => f.fieldname === 'image');
+    const logoFile = req.files && req.files.find(f => f.fieldname === 'logo');
+
+    if (!imageFile) {
+      console.error(`[Face Crop] Error: No image file found in request`);
+      console.error(`  - Expected fieldname: 'image'`);
+      console.error(`  - Received fieldnames:`, req.files ? req.files.map(f => f.fieldname) : 'no files');
       return res.status(400).json({ success: false, error: 'No image uploaded' });
     }
 
     // Convert to absolute paths (Python needs absolute paths to work correctly)
-    const inputPath = path.resolve(req.file.path);
+    const inputPath = path.resolve(imageFile.path);
     const outputPath = path.join(PROCESSED_DIR, `face-crop-${Date.now()}.png`);
 
     console.log(`[Face Crop] Processing image: ${inputPath}`);
 
-    // Call Python school ID processor
-    const pythonScript = path.resolve(path.join(__dirname, '..', 'tools', 'school_id_processor_cli.py'));
-    const pythonProcess = spawn('python', [
+    // Extract optional parameters from request
+    const bgColor = req.body.bg_color || '#FFFFFF';
+    const glowAmount = parseInt(req.body.glow || '60', 10);
+    const logoPos = req.body.logo_pos || 'Top Right';
+    const logoPath = logoFile ? path.resolve(logoFile.path) : null;
+
+    console.log(`[Face Crop] Parameters:`, { bgColor, glowAmount, logoPos, hasLogo: !!logoPath });
+
+    // Resolve Python script path (project root `scripts/face_crop_engine.py`)
+    const pythonScript = path.resolve(path.join(__dirname, '..', '..', 'scripts', 'face_crop_engine.py'));
+    if (!fs.existsSync(pythonScript)) {
+      console.error(`[Face Crop] Missing face crop script: ${pythonScript}`);
+      // Clean up uploaded files
+      if (req.files && Array.isArray(req.files)) {
+        req.files.forEach(f => { if (fs.existsSync(f.path)) fs.unlinkSync(f.path); });
+      }
+      return res.status(500).json({ success: false, error: 'Face crop engine script not found on server' });
+    }
+
+    // Build Python arguments
+    const pythonArgs = [
       pythonScript,
-      inputPath,
-      outputPath
-    ]);
+      '--input', inputPath,
+      '--output', PROCESSED_DIR,
+      '--bg_color', bgColor,
+      '--glow', String(glowAmount),
+    ];
+
+    // Add logo parameters if provided
+    if (logoPath) {
+      pythonArgs.push('--logo', logoPath);
+      pythonArgs.push('--logo_pos', logoPos);
+    }
+
+    console.log(`[Face Crop] Python command:`, 'python', pythonArgs.join(' '));
+
+    // Call Python face crop engine
+    const pythonProcess = spawn('python', pythonArgs);
 
     let stdout = '';
     let stderr = '';
@@ -385,11 +479,34 @@ router.post('/face-crop', upload.single('image'), async (req, res) => {
     pythonProcess.on('close', (code) => {
       // Clean up input file
       if (fs.existsSync(inputPath)) fs.unlinkSync(inputPath);
+      if (logoPath && fs.existsSync(logoPath)) fs.unlinkSync(logoPath);
+
+      console.log(`[Face Crop] Python process exited with code: ${code}`);
+      console.log(`[Face Crop] Full stdout: ${stdout}`);
+      console.log(`[Face Crop] Full stderr: ${stderr}`);
 
       if (code === 2) {
         // Exit code 2 = no face detected
         console.warn(`[Face Crop] No face detected in image`);
         if (fs.existsSync(outputPath)) fs.unlinkSync(outputPath);
+
+        // Graceful fallback: return the original uploaded image as a data URL
+        try {
+          const origBuffer = fs.readFileSync(inputPath);
+          const origBase64 = origBuffer.toString('base64');
+          const mimeType = 'image/jpeg';
+          const dataUrl = `data:${mimeType};base64,${origBase64}`;
+          console.log('[Face Crop] Returning original image as fallback (no face detected)');
+          return res.json({
+            success: true,
+            processedImageUrl: dataUrl,
+            message: 'No face detected. Returning original image as fallback.'
+          });
+        } catch (readErr) {
+          console.error('[Face Crop] Fallback read error:', readErr);
+        }
+
+        // If fallback failed, respond with 400 and friendly message
         return res.status(400).json({
           success: false,
           error: 'No face detected in the provided image. Please upload a clear photo of a face.'
@@ -398,6 +515,7 @@ router.post('/face-crop', upload.single('image'), async (req, res) => {
 
       if (code !== 0) {
         console.error(`[Face Crop] Python process exited with code ${code}`);
+        console.error(`[Face Crop] Stderr details: ${stderr}`);
         if (fs.existsSync(outputPath)) fs.unlinkSync(outputPath);
         return res.status(500).json({
           success: false,
@@ -405,23 +523,46 @@ router.post('/face-crop', upload.single('image'), async (req, res) => {
         });
       }
 
-      // Check if output file was created
-      if (!fs.existsSync(outputPath)) {
-        return res.status(500).json({
-          success: false,
-          error: 'Face crop processing failed: No output generated'
-        });
+      // Find the output image file (face_crop_engine.py outputs with original filename)
+      // The Python script uses: output_filepath = os.path.join(output_path, filename)
+      // So we need to look for a file with the same name as the input in the PROCESSED_DIR
+      let resultImagePath = null;
+      const inputFilename = path.basename(inputPath); // e.g. "1769863451430-n4pz5l.jpg"
+      const possibleOutputPath = path.join(PROCESSED_DIR, inputFilename);
+      
+      console.log(`[Face Crop] Looking for output file:`, possibleOutputPath);
+
+      if (fs.existsSync(possibleOutputPath)) {
+        resultImagePath = possibleOutputPath;
+        console.log(`[Face Crop] Found output file: ${resultImagePath}`);
+      } else {
+        // Also try with .png extension in case Python converted the format
+        const pngPath = path.join(PROCESSED_DIR, path.basename(inputPath, path.extname(inputPath)) + '.png');
+        if (fs.existsSync(pngPath)) {
+          resultImagePath = pngPath;
+          console.log(`[Face Crop] Found PNG variant: ${resultImagePath}`);
+        } else {
+          // List directory contents for debugging
+          const files = fs.readdirSync(PROCESSED_DIR);
+          console.error(`[Face Crop] Output file not found. Looking for: ${inputFilename}`);
+          console.error(`[Face Crop] Files in ${PROCESSED_DIR}:`, files);
+          return res.status(500).json({
+            success: false,
+            error: 'Face crop processing failed: No output generated'
+          });
+        }
       }
 
       // Read the processed image
-      const imageBuffer = fs.readFileSync(outputPath);
+      console.log(`[Face Crop] Reading output file: ${resultImagePath}`);
+      const imageBuffer = fs.readFileSync(resultImagePath);
       const base64 = imageBuffer.toString('base64');
       const dataUrl = `data:image/png;base64,${base64}`;
 
-      console.log(`[Face Crop] Successfully processed: ${outputPath}`);
+      console.log(`[Face Crop] Successfully processed: ${resultImagePath} (${imageBuffer.length} bytes)`);
 
       // Clean up output file
-      if (fs.existsSync(outputPath)) fs.unlinkSync(outputPath);
+      if (fs.existsSync(resultImagePath)) fs.unlinkSync(resultImagePath);
 
       res.json({
         success: true,
@@ -435,7 +576,7 @@ router.post('/face-crop', upload.single('image'), async (req, res) => {
       if (pythonProcess.exitCode === null) {
         pythonProcess.kill();
         if (fs.existsSync(inputPath)) fs.unlinkSync(inputPath);
-        if (fs.existsSync(outputPath)) fs.unlinkSync(outputPath);
+        if (logoPath && fs.existsSync(logoPath)) fs.unlinkSync(logoPath);
         res.status(500).json({
           success: false,
           error: 'Face crop processing timeout (took longer than 120 seconds)'
@@ -444,8 +585,13 @@ router.post('/face-crop', upload.single('image'), async (req, res) => {
     }, 120000);
   } catch (error) {
     console.error('[Face Crop] Error:', error);
-    if (req.file && fs.existsSync(req.file.path)) {
-      fs.unlinkSync(req.file.path);
+    // Clean up uploaded files
+    if (req.files && Array.isArray(req.files)) {
+      req.files.forEach(file => {
+        if (fs.existsSync(file.path)) {
+          fs.unlinkSync(file.path);
+        }
+      });
     }
     res.status(500).json({
       success: false,

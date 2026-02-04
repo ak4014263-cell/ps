@@ -79,7 +79,7 @@ export const supabase = {
 
   storage: {
     from: (bucket: string) => ({
-      upload: async (path: string, file: any) => {
+      upload: async (path: string, file: any, p0: { contentType: string; upsert: boolean; }) => {
         console.debug(`[STUB] Supabase Storage: Upload ${path} to ${bucket}`);
         return { data: { path }, error: null };
       },

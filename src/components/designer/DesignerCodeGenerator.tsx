@@ -146,9 +146,9 @@ export function DesignerCodeGenerator({ onAddCode }: DesignerCodeGeneratorProps)
           Add Code
         </Button>
       </DialogTrigger>
-      <DialogContent className="max-w-md">
+      <DialogContent className="max-w-md bg-card text-foreground border-border">
         <DialogHeader>
-          <DialogTitle>Generate QR Code / Barcode</DialogTitle>
+          <DialogTitle className="text-foreground">Generate QR Code / Barcode</DialogTitle>
         </DialogHeader>
 
         <Tabs value={activeTab} onValueChange={(v) => setActiveTab(v as 'qr' | 'barcode')}>

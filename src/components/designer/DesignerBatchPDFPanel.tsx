@@ -25,7 +25,7 @@ import {
 import { toast } from 'sonner';
 import Papa from 'papaparse';
 import JSZip from 'jszip';
-import { apiService } from '@/lib/api';
+import { supabase } from '@/integrations/supabase/client';
 
 interface DesignerBatchPDFPanelProps {
   canvas: any;

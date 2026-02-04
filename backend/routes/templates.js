@@ -4,6 +4,65 @@ import { getAll, getOne, execute } from '../db.js';
 
 const router = express.Router();
 
+// Helper function to format template response
+function formatTemplate(template) {
+  // Parse template_data if it's a string
+  let templateData = template.template_data;
+  if (typeof templateData === 'string') {
+    try {
+      templateData = JSON.parse(templateData);
+    } catch (e) {
+      templateData = {};
+    }
+  } else if (!templateData) {
+    templateData = {};
+  }
+
+  // Extract actual values from template_data or use database fields as fallback
+  const width_mm = templateData.width_mm || template.width_mm || 100;
+  const height_mm = templateData.height_mm || template.height_mm || 100;
+  const has_back_side = templateData.has_back_side !== undefined ? templateData.has_back_side : (template.has_back_side === 1 || template.has_back_side === true);
+  let design_json = templateData.design_json || template.design_json;
+  let back_design_json = templateData.back_design_json || template.back_design_json;
+
+  // Parse design_json if it's a string
+  if (design_json && typeof design_json === 'string') {
+    try {
+      design_json = JSON.parse(design_json);
+    } catch (e) {
+      design_json = null;
+    }
+  }
+
+  // Parse back_design_json if it's a string
+  if (back_design_json && typeof back_design_json === 'string') {
+    try {
+      back_design_json = JSON.parse(back_design_json);
+    } catch (e) {
+      back_design_json = null;
+    }
+  }
+
+  const templateName = template.name || template.template_name || 'Untitled';
+  const templateCategory = template.category || template.template_type || template.type || 'General';
+
+  return {
+    id: template.id,
+    name: templateName,
+    category: templateCategory,
+    vendor_id: template.vendor_id,
+    is_public: templateData.is_public === true || template.is_public === 1 || template.is_public === true,
+    width_mm: width_mm,
+    height_mm: height_mm,
+    thumbnail_url: template.thumbnail_url,
+    design_json: design_json,
+    back_design_json: back_design_json,
+    has_back_side: has_back_side,
+    created_at: template.created_at,
+    template_data: templateData
+  };
+}
+
 // ============================================================================
 // CREATE TEMPLATE
 // ============================================================================
@@ -208,51 +267,44 @@ router.delete('/:id', async (req, res) => {
 
 router.get('/', async (req, res) => {
   try {
-    // Get all templates - include public ones and vendor-specific ones
-    // If vendorId query param is provided, filter by vendor or public
-    const { vendorId } = req.query;
-    
-    let query = 'SELECT * FROM templates';
-    let params = [];
-    
-    if (vendorId) {
-      // Show templates for this vendor OR public templates (available to all vendors)
-      // Check is_public in template_data JSON (is_public is stored in template_data, not as a separate column)
-      query = `SELECT * FROM templates 
-               WHERE vendor_id = ? 
-               OR (template_data LIKE '%"is_public":true%')
-               OR (template_data LIKE '%"is_public":"true"%')
-               ORDER BY created_at DESC
-               LIMIT 100`;
-      params = [vendorId];
-    } else {
-      query = 'SELECT * FROM templates ORDER BY created_at DESC LIMIT 100';
+    const templates = await getAll('SELECT * FROM templates ORDER BY created_at DESC');
+    console.log('[DEBUG] GET /api/templates - Retrieved templates:', templates.length);
+    if (templates.length > 0) {
+      console.log('[DEBUG] First template raw data:', templates[0]);
     }
-    
-    const templates = await getAll(query, params);
-    
-    // Parse template_data for each template
-    const parsedTemplates = templates.map(template => {
-      if (template.template_data && typeof template.template_data === 'string') {
-        try {
-          template.template_data = JSON.parse(template.template_data);
-        } catch (e) {
-          // Keep as string if not valid JSON
-        }
-      }
-      return template;
-    });
-    
-    res.json({
-      success: true,
-      count: parsedTemplates.length,
-      data: parsedTemplates,
-    });
+    const formatted = templates.map(formatTemplate);
+    console.log('[DEBUG] First formatted template:', formatted.length > 0 ? formatted[0] : 'none');
+    res.json(formatted);
   } catch (error) {
-    res.status(500).json({
-      success: false,
-      error: error.message,
-    });
+    console.error('Get all templates error:', error);
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
+// ============================================================================
+// GET TEMPLATES BY VENDOR (must be before /:id route)
+// ============================================================================
+
+router.get('/vendor/:vendorId', async (req, res) => {
+  try {
+    const { vendorId } = req.params;
+    console.log('[DEBUG] GET /api/templates/vendor/:vendorId called -', vendorId);
+    
+    const tables = await getAll("SHOW TABLES LIKE 'templates'");
+    if (!tables || tables.length === 0) {
+      return res.json([]);
+    }
+
+    const templates = await getAll(
+      `SELECT * FROM templates WHERE vendor_id = ? ORDER BY created_at DESC`,
+      [vendorId]
+    );
+
+    console.log('[DEBUG] templates rows fetched:', Array.isArray(templates) ? templates.length : typeof templates);
+    res.json(templates.map(formatTemplate));
+  } catch (error) {
+    console.error('Get templates by vendor error:', error);
+    res.status(500).json({ success: false, error: error.message });
   }
 });
 
@@ -266,85 +318,13 @@ router.get('/:id', async (req, res) => {
     const template = await getOne('SELECT * FROM templates WHERE id = ?', [id]);
     
     if (!template) {
-      return res.status(404).json({
-        success: false,
-        error: 'Template not found',
-      });
+      return res.status(404).json({ success: false, error: 'Template not found' });
     }
 
-    // Parse template_data if it's JSON
-    if (template.template_data && typeof template.template_data === 'string') {
-      try {
-        template.template_data = JSON.parse(template.template_data);
-      } catch (e) {
-        // Keep as string if not valid JSON
-      }
-    }
-
-    res.json({
-      success: true,
-      data: template,
-    });
+    res.json(formatTemplate(template));
   } catch (error) {
-    res.status(500).json({
-      success: false,
-      error: error.message,
-    });
-  }
-});
-
-// ============================================================================
-// GET TEMPLATES BY VENDOR
-// ============================================================================
-
-router.get('/vendor/:vendorId', async (req, res) => {
-  try {
-    const { vendorId } = req.params;
-    console.log('[DEBUG] GET /api/templates/vendor/:vendorId called -', vendorId);
-    // Get templates that belong to this vendor OR are public (available to all vendors)
-    // Check is_public in template_data JSON (is_public is stored in template_data, not as a separate column)
-    // Ensure templates table exists to avoid SQL errors
-    const tables = await getAll("SHOW TABLES LIKE 'templates'");
-    if (!tables || tables.length === 0) {
-      return res.json({ success: true, count: 0, data: [] });
-    }
-
-    // Use JSON_EXTRACT when possible to robustly check is_public inside JSON column
-    const templates = await getAll(
-      `SELECT * FROM templates 
-       WHERE vendor_id = ? 
-       OR JSON_EXTRACT(template_data, '$.is_public') = true
-       OR JSON_EXTRACT(template_data, '$.is_public') = 'true'
-       ORDER BY created_at DESC
-       LIMIT 50`,
-      [vendorId]
-    );
-
-    console.log('[DEBUG] templates rows fetched:', Array.isArray(templates) ? templates.length : typeof templates);
-
-    // Parse template_data for each template
-    const parsedTemplates = templates.map(template => {
-      if (template.template_data && typeof template.template_data === 'string') {
-        try {
-          template.template_data = JSON.parse(template.template_data);
-        } catch (e) {
-          // Keep as string if not valid JSON
-        }
-      }
-      return template;
-    });
-
-    res.json({
-      success: true,
-      count: parsedTemplates.length,
-      data: parsedTemplates,
-    });
-  } catch (error) {
-    console.error('Get templates by vendor error:', error && error.stack ? error.stack : error);
-    res.status(500).json({
-      success: false,
-      error: error.message,
-    });
+    console.error('Get template by ID error:', error);
+    res.status(500).json({ success: false, error: error.message });
   }
 });
 

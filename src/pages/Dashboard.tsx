@@ -23,9 +23,8 @@ import { GlobalProjectsView } from '@/components/admin/GlobalProjectsView';
 import { TemplateManagement } from '@/components/admin/TemplateManagement';
 import { AdminReportsPanel } from '@/components/admin/AdminReportsPanel';
 import { CreateVendorForm } from '@/components/admin/CreateVendorForm';
-import { CreateStaffForm } from '@/components/admin/CreateStaffForm';
+import { CreateStaffForm } from '@/components/admin/CreateStaffForm';import { TeacherLinkManagement } from '@/components/admin/TeacherLinkManagement';
 import { AdvancedTemplateDesigner } from '@/components/designer/AdvancedTemplateDesigner';
-import { TeacherLinkManagement } from '@/components/admin/TeacherLinkManagement';
 
 export default function Dashboard() {
   const location = useLocation();

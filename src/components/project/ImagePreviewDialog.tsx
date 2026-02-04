@@ -41,8 +41,18 @@ export function ImagePreviewDialog({
   const [isResetting, setIsResetting] = useState(false);
   const [isApplying, setIsApplying] = useState(false);
   const [isBeautifying, setIsBeautifying] = useState(false);
+  const [isFaceCropping, setIsFaceCropping] = useState(false);
   const [processedUrl, setProcessedUrl] = useState<string | null>(null);
   const [beautifyStrength, setBeautifyStrength] = useState(70);  // 0-100, default 70%
+  const [beautifyMode, setBeautifyMode] = useState<'default' | 'portrait' | 'soft' | 'vibrant'>('default');
+  
+  // Face crop advanced parameters
+  const [faceGlowAmount, setFaceGlowAmount] = useState(60);  // 0-100
+  const [faceBgColor, setFaceBgColor] = useState('#F0F0F0');  // Background color
+  const [faceShowAdvanced, setFaceShowAdvanced] = useState(false);
+  const [faceLogoFile, setFaceLogoFile] = useState<File | null>(null);
+  const [faceLogoPosition, setFaceLogoPosition] = useState<'top-left' | 'top-right'>('top-right');
+  
   const queryClient = useQueryClient();
   
   // Image adjustment states
@@ -339,6 +349,190 @@ export function ImagePreviewDialog({
     }
   };
 
+  const handleFaceCrop = async () => {
+    const currentUrl = processedUrl || imageUrl;
+    if (!currentUrl) return;
+
+    setIsFaceCropping(true);
+    toast.info('Processing ID photo with face crop, beautify, and effects...');
+
+    try {
+      // Fetch the image and convert to blob
+      const response = await fetch(currentUrl);
+      if (!response.ok) throw new Error('Failed to fetch image for face crop');
+      const imageBlob = await response.blob();
+
+      // Prepare request to face-crop endpoint with custom parameters
+      const formData = new FormData();
+      const file = new File([imageBlob], 'photo.jpg', { type: imageBlob.type || 'image/jpeg' });
+      formData.append('image', file);
+      
+      // Add face crop parameters
+      formData.append('bg_color', faceBgColor);
+      formData.append('glow', String(faceGlowAmount));
+      if (faceLogoFile) {
+        formData.append('logo', faceLogoFile);
+        formData.append('logo_pos', faceLogoPosition === 'top-left' ? 'Top Left' : 'Top Right');
+      }
+
+      console.log('[FaceCrop] FormData contents:');
+      for (const [key, value] of formData.entries()) {
+        if (value instanceof File) {
+          console.log(`  - ${key}: File(name=${value.name}, size=${value.size}, type=${value.type})`);
+        } else {
+          console.log(`  - ${key}: ${value}`);
+        }
+      }
+
+      console.log('[FaceCrop] Sending to face-crop endpoint with params:', {
+        bg_color: faceBgColor,
+        glow: faceGlowAmount,
+        logo: faceLogoFile?.name || 'none',
+        logo_pos: faceLogoPosition,
+      });
+      
+      const fcResponse = await fetch('http://localhost:3001/api/image/face-crop', {
+        method: 'POST',
+        body: formData,
+      });
+
+      if (!fcResponse.ok) {
+        const errText = await fcResponse.text().catch(() => 'No error body');
+        console.error('[FaceCrop] Server error:', fcResponse.status, errText);
+        throw new Error(`Face crop failed: ${fcResponse.status}`);
+      }
+
+      const contentType = fcResponse.headers.get('content-type') || '';
+      console.log('[FaceCrop] Response content-type:', contentType);
+
+      // Parse JSON response - contains base64 data URL or saved file URL
+      if (contentType.includes('application/json')) {
+        const json = await fcResponse.json();
+        console.log('[FaceCrop] JSON response:', json);
+        if (!json.success) throw new Error(json.error || 'Face crop failed');
+        
+        // Backend returns processedImageUrl with data URL (base64 encoded PNG)
+        let processedImageUrl = json.processedImageUrl || json.url;
+        if (!processedImageUrl) throw new Error('No image URL returned from server');
+        
+        console.log('[FaceCrop] Received image URL (first 100 chars):', processedImageUrl.substring(0, 100));
+
+        // Set the processed image directly (data URL doesn't need validation)
+        setProcessedUrl(processedImageUrl);
+        setBrightness(100);
+        setContrast(100);
+        setSaturation(100);
+
+        // If we want to persist this image, we need to upload it
+        if (processedImageUrl.startsWith('data:')) {
+          console.log('[FaceCrop] Converting data URL to blob and persisting...');
+          // Convert data URL to blob
+          const arr = processedImageUrl.split(',');
+          const mime = arr[0].match(/:(.*?);/)[1];
+          const bstr = atob(arr[1]);
+          let n = bstr.length;
+          const u8arr = new Uint8Array(n);
+          while(n--) {
+            u8arr[n] = bstr.charCodeAt(n);
+          }
+          const blob = new Blob([u8arr], { type: mime });
+
+          // Upload to backend (save-photo endpoint)
+          const saveFormData = new FormData();
+          const saveFile = new File([blob], 'face_cropped.jpg', { type: mime });
+          saveFormData.append('photo', saveFile);
+          saveFormData.append('recordId', recordId);
+          saveFormData.append('photoType', 'face_cropped');
+
+          console.log('[FaceCrop] Uploading processed image to save-photo endpoint...');
+          const saveResponse = await fetch('http://localhost:3001/api/image/save-photo', {
+            method: 'POST',
+            body: saveFormData,
+          });
+
+          if (!saveResponse.ok) {
+            const errorText = await saveResponse.text();
+            console.error('[FaceCrop] Save response error:', errorText);
+            // Continue even if save fails - we still have the data URL
+          } else {
+            const saveData = await saveResponse.json();
+            if (saveData.success && saveData.url) {
+              const publicUrl = saveData.url;
+              const fullUrl = publicUrl.startsWith('http') ? publicUrl : `http://localhost:3001${publicUrl}`;
+              console.log('[FaceCrop] Saved successfully to:', fullUrl);
+              // Update preview with permanent URL
+              setProcessedUrl(fullUrl);
+            }
+          }
+        }
+
+        // Update record metadata
+        await apiService.dataRecordsAPI.update(recordId, {
+          original_photo_url: originalPhotoUrl || currentUrl,
+          processing_status: 'face_cropped',
+        });
+
+        queryClient.invalidateQueries({ queryKey: ['project-records', projectId] });
+        toast.success('ID photo processed successfully! (Face crop + beautify + effects applied)');
+        return;
+      }
+
+      // If response is binary, treat it as blob
+      console.log('[FaceCrop] Received binary image response');
+      const returnedBlob = await fcResponse.blob();
+      if (!returnedBlob || returnedBlob.size === 0) {
+        throw new Error('Received empty processed image from server');
+      }
+
+      // Convert to data URL for preview
+      const reader = new FileReader();
+      reader.onload = () => {
+        const dataUrl = reader.result as string;
+        setProcessedUrl(dataUrl);
+        setBrightness(100);
+        setContrast(100);
+        setSaturation(100);
+      };
+      reader.readAsDataURL(returnedBlob);
+
+      // Optionally persist to backend
+      const saveFormData = new FormData();
+      const saveFile = new File([returnedBlob], 'face_cropped.jpg', { type: 'image/jpeg' });
+      saveFormData.append('photo', saveFile);
+      saveFormData.append('recordId', recordId);
+      saveFormData.append('photoType', 'face_cropped');
+
+      console.log('[FaceCrop] Uploading processed image to save-photo endpoint...');
+      const saveResponse = await fetch('http://localhost:3001/api/image/save-photo', {
+        method: 'POST',
+        body: saveFormData,
+      }).catch(() => null);
+
+      if (saveResponse?.ok) {
+        const saveData = await saveResponse.json();
+        if (saveData.success && saveData.url) {
+          const publicUrl = saveData.url;
+          const fullUrl = publicUrl.startsWith('http') ? publicUrl : `http://localhost:3001${publicUrl}`;
+          console.log('[FaceCrop] Persisted to:', fullUrl);
+          setProcessedUrl(fullUrl);
+        }
+      }
+
+      await apiService.dataRecordsAPI.update(recordId, {
+        original_photo_url: originalPhotoUrl || currentUrl,
+        processing_status: 'face_cropped',
+      });
+
+      queryClient.invalidateQueries({ queryKey: ['project-records', projectId] });
+      toast.success('ID photo processed successfully! (Face crop + beautify + effects applied)');
+    } catch (error: any) {
+      console.error('Face crop failed:', error);
+      toast.error(`Face crop failed: ${error?.message || 'Unknown error'}`);
+    } finally {
+      setIsFaceCropping(false);
+    }
+  };
+
   const handleBeautify = async () => {
     const currentUrl = processedUrl || imageUrl;
     if (!currentUrl) return;
@@ -357,6 +551,7 @@ export function ImagePreviewDialog({
       const file = new File([imageBlob], 'photo.jpg', { type: 'image/jpeg' });
       formData.append('image', file);
       formData.append('strength', String(beautifyStrength / 100));  // Convert 0-100 to 0-1
+      formData.append('mode', beautifyMode);
 
       // Call beautify endpoint
       const beautifyResponse = await fetch('http://localhost:3001/api/image/beautify', {
@@ -501,11 +696,25 @@ export function ImagePreviewDialog({
                 style={filterStyle}
                 crossOrigin="anonymous"
                 onError={(e) => {
-                  console.error('[ImagePreview] Failed to load image:', displayUrl);
-                  console.error('[ImagePreview] Error:', e);
+                  console.error('[ImagePreview] Failed to load image:');
+                  console.error('  - displayUrl:', displayUrl);
+                  console.error('  - processedUrl:', processedUrl);
+                  console.error('  - imageUrl:', imageUrl);
+                  console.error('  - error:', e);
+                  console.error('  - error.currentTarget:', e.currentTarget);
+                  if (e.currentTarget) {
+                    console.error('  - img.src:', (e.currentTarget as HTMLImageElement).src);
+                    console.error('  - img.naturalWidth:', (e.currentTarget as HTMLImageElement).naturalWidth);
+                  }
                 }}
                 onLoad={() => {
                   console.log('[ImagePreview] Image loaded successfully:', displayUrl);
+                  console.log('  - dimensions:', {
+                    naturalWidth: imageRef.current?.naturalWidth,
+                    naturalHeight: imageRef.current?.naturalHeight,
+                    width: imageRef.current?.width,
+                    height: imageRef.current?.height,
+                  });
                 }}
               />
             ) : (
@@ -636,7 +845,129 @@ export function ImagePreviewDialog({
               <p className="text-xs text-muted-foreground">
                 Lower = more natural, Higher = more pronounced enhancement
               </p>
+              <div className="pt-2">
+                <label className="text-xs text-muted-foreground mr-2">Mode:</label>
+                <select
+                  value={beautifyMode}
+                  onChange={(e) => setBeautifyMode(e.target.value as any)}
+                  className="border rounded px-2 py-1 text-sm"
+                >
+                  <option value="default">Default</option>
+                  <option value="portrait">Portrait</option>
+                  <option value="soft">Soft</option>
+                  <option value="vibrant">Vibrant</option>
+                </select>
+              </div>
             </div>
+          </div>
+
+          {/* Face Crop Advanced Settings */}
+          <div className="border rounded-lg p-4 bg-blue-50/50">
+            <button
+              onClick={() => setFaceShowAdvanced(!faceShowAdvanced)}
+              className="w-full text-left font-medium text-sm flex items-center gap-2 mb-3"
+            >
+              <CreditCard className="h-4 w-4" />
+              Face Crop + Effects Settings
+              <span className="ml-auto text-xs text-muted-foreground">
+                {faceShowAdvanced ? '▼' : '▶'}
+              </span>
+            </button>
+            
+            {faceShowAdvanced && (
+              <div className="space-y-4 pt-2 border-t">
+                {/* Glow Effect Slider */}
+                <div className="space-y-2">
+                  <div className="flex items-center justify-between">
+                    <Label className="text-xs flex items-center gap-1">
+                      ✨ Glow Effect
+                    </Label>
+                    <span className="text-xs text-muted-foreground">{faceGlowAmount}%</span>
+                  </div>
+                  <Slider
+                    value={[faceGlowAmount]}
+                    onValueChange={([v]) => setFaceGlowAmount(v)}
+                    min={0}
+                    max={100}
+                    step={1}
+                    className="w-full"
+                  />
+                  <p className="text-xs text-muted-foreground">Higher = brighter studio glow effect</p>
+                </div>
+
+                {/* Background Color Picker */}
+                <div className="space-y-2">
+                  <Label className="text-xs flex items-center gap-1">
+                    🎨 Background Color
+                  </Label>
+                  <div className="flex gap-2">
+                    <input
+                      type="color"
+                      value={faceBgColor}
+                      onChange={(e) => setFaceBgColor(e.target.value)}
+                      className="w-12 h-10 rounded cursor-pointer border"
+                    />
+                    <input
+                      type="text"
+                      value={faceBgColor}
+                      onChange={(e) => setFaceBgColor(e.target.value)}
+                      placeholder="#F0F0F0"
+                      className="flex-1 px-3 py-2 text-xs border rounded bg-white"
+                    />
+                  </div>
+                  <p className="text-xs text-muted-foreground">Default: #F0F0F0 (light gray)</p>
+                </div>
+
+                {/* Logo Upload */}
+                <div className="space-y-2">
+                  <Label className="text-xs flex items-center gap-1">
+                    🏫 School Logo (Optional)
+                  </Label>
+                  <input
+                    type="file"
+                    accept="image/*"
+                    onChange={(e) => {
+                      if (e.target.files?.[0]) {
+                        setFaceLogoFile(e.target.files[0]);
+                      }
+                    }}
+                    className="text-xs file:mr-2 file:px-2 file:py-1 file:rounded file:border file:text-xs file:font-medium file:bg-muted"
+                  />
+                  {faceLogoFile && (
+                    <p className="text-xs text-green-600 flex items-center gap-1">
+                      ✓ {faceLogoFile.name}
+                    </p>
+                  )}
+                </div>
+
+                {/* Logo Position */}
+                {faceLogoFile && (
+                  <div className="space-y-2">
+                    <Label className="text-xs flex items-center gap-1">
+                      📍 Logo Position
+                    </Label>
+                    <div className="flex gap-2">
+                      <Button
+                        variant={faceLogoPosition === 'top-left' ? 'default' : 'outline'}
+                        size="sm"
+                        onClick={() => setFaceLogoPosition('top-left')}
+                        className="flex-1"
+                      >
+                        Top Left
+                      </Button>
+                      <Button
+                        variant={faceLogoPosition === 'top-right' ? 'default' : 'outline'}
+                        size="sm"
+                        onClick={() => setFaceLogoPosition('top-right')}
+                        className="flex-1"
+                      >
+                        Top Right
+                      </Button>
+                    </div>
+                  </div>
+                )}
+              </div>
+            )}
           </div>
 
           {/* Actions */}
@@ -693,6 +1024,23 @@ export function ImagePreviewDialog({
                 <>
                   <Wand2 className="h-4 w-4 mr-2" />
                   Beautify
+                </>
+              )}
+            </Button>
+            <Button
+              onClick={handleFaceCrop}
+              disabled={isFaceCropping || !imageUrl}
+              className="bg-gradient-to-r from-blue-500 to-cyan-500 hover:from-blue-600 hover:to-cyan-600"
+            >
+              {isFaceCropping ? (
+                <>
+                  <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                  Processing...
+                </>
+              ) : (
+                <>
+                  <Crop className="h-4 w-4 mr-2" />
+                  Face Crop + Effects
                 </>
               )}
             </Button>
