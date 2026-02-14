@@ -2,11 +2,6 @@ import { createRoot } from "react-dom/client";
 import App from "./App.tsx";
 import "./index.css";
 import { configureBackgroundRemoval } from "./lib/backgroundRemoval";
-import { supabase } from "./lib/supabase-stub";
-
-// Make supabase available globally (stub for migration)
-(window as any).supabase = supabase;
-
 // Configure rembg microservice for background removal
 // Uses local self-hosted service (zero cost, unlimited)
 configureBackgroundRemoval({

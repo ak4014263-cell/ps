@@ -4,6 +4,7 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Pencil, Trash2, X, Check, ChevronDown, ChevronUp } from 'lucide-react';
 // Supabase disconnected - using XAMPP MySQL
+import { apiService } from '@/lib/api';
 import { useQueryClient } from '@tanstack/react-query';
 import { toast } from 'sonner';
 import { deleteFromCloudinary } from '@/lib/cloudinary';
@@ -65,12 +66,7 @@ export function DataRecordItem({ record, projectId }: DataRecordItemProps) {
   const handleSave = async () => {
     setIsSaving(true);
     try {
-      const { error } = await supabase
-        .from('data_records')
-        .update({ data_json: editData })
-        .eq('id', record.id);
-
-      if (error) throw error;
+      await apiService.dataRecordsAPI.update(record.id, { data_json: editData });
 
       toast.success('Record updated');
       queryClient.invalidateQueries({ queryKey: ['project-records', projectId] });
@@ -96,12 +92,7 @@ export function DataRecordItem({ record, projectId }: DataRecordItemProps) {
         }
       }
 
-      const { error } = await supabase
-        .from('data_records')
-        .delete()
-        .eq('id', record.id);
-
-      if (error) throw error;
+      await apiService.dataRecordsAPI.delete(record.id);
 
       toast.success('Record and associated image deleted');
       queryClient.invalidateQueries({ queryKey: ['project-records', projectId] });
@@ -137,7 +128,7 @@ export function DataRecordItem({ record, projectId }: DataRecordItemProps) {
               </div>
             </button>
           </CollapsibleTrigger>
-          
+
           <div className="flex items-center gap-1">
             {isEditing ? (
               <>

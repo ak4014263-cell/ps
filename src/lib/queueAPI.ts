@@ -52,12 +52,6 @@ export const queueAPI = {
     return response.json();
   },
 
-    if (!response.ok) {
-      throw new Error(`Failed to queue bulk face crop: ${response.statusText}`);
-    }
-
-    return response.json();
-  },
 
   /**
    * Get job status by ID

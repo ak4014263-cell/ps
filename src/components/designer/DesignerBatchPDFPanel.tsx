@@ -1,4 +1,5 @@
-import { useState, useMemo } from 'react';
+import { useState, useMemo, useEffect } from 'react';
+import { useQuery } from '@tanstack/react-query';
 import { Button } from '@/components/ui/button';
 import { Label } from '@/components/ui/label';
 import { Input } from '@/components/ui/input';
@@ -7,25 +8,40 @@ import { Progress } from '@/components/ui/progress';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
-import { 
-  X, 
-  Upload, 
-  FileSpreadsheet, 
-  FileText, 
-  Download, 
-  Loader2, 
+import {
+  X,
+  Upload,
+  FileSpreadsheet,
+  FileText,
+  Download,
+  Loader2,
   CheckCircle2,
   AlertCircle,
   Trash2,
   Eye,
   Grid3X3,
   ImageIcon,
-  FolderArchive
+  FolderArchive,
+  Database,
+  Triangle,
+  Hexagon,
+  Heart
 } from 'lucide-react';
 import { toast } from 'sonner';
 import Papa from 'papaparse';
 import JSZip from 'jszip';
-import { supabase } from '@/integrations/supabase/client';
+import jsPDF from 'jspdf'; // Added jsPDF
+import {
+  Canvas as FabricCanvas,
+  Image as FabricImage,
+  Circle,
+  Rect,
+  Polygon,
+  Path,
+  Ellipse
+} from 'fabric'; // Added Fabric imports
+import { apiService } from '@/lib/api';
+import { MaskedPhotoObject } from './PhotoMaskingModule';
 
 interface DesignerBatchPDFPanelProps {
   canvas: any;
@@ -37,6 +53,7 @@ interface DesignerBatchPDFPanelProps {
   designJson: any;
   backDesignJson?: any;
   category: string;
+  projectId?: string;
   onPreviewRecord?: (record: Record<string, string>) => void;
   onClose: () => void;
 }
@@ -59,6 +76,7 @@ export function DesignerBatchPDFPanel({
   designJson,
   backDesignJson,
   category,
+  projectId,
   onPreviewRecord,
   onClose,
 }: DesignerBatchPDFPanelProps) {
@@ -66,6 +84,7 @@ export function DesignerBatchPDFPanel({
   const [columns, setColumns] = useState<string[]>([]);
   const [isProcessing, setIsProcessing] = useState(false);
   const [isGenerating, setIsGenerating] = useState(false);
+  const [isPreviewing, setIsPreviewing] = useState(false);
   const [isUploadingPhotos, setIsUploadingPhotos] = useState(false);
   const [photoUploadProgress, setPhotoUploadProgress] = useState(0);
   const [uploadedPhotos, setUploadedPhotos] = useState<Map<string, string>>(new Map());
@@ -75,10 +94,21 @@ export function DesignerBatchPDFPanel({
   const [generatedPDFs, setGeneratedPDFs] = useState<{ side: string; url: string }[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [photoFieldName, setPhotoFieldName] = useState<string>('');
+  const [selectedProjectId, setSelectedProjectId] = useState<string | undefined>(undefined);
+  const effectiveProjectId = projectId || selectedProjectId;
+
+  const { data: projectsData } = useQuery({
+    queryKey: ['available-projects-batch'],
+    queryFn: () => apiService.projectsAPI.getAll(),
+    enabled: !projectId, // Only fetch if no project context
+  });
+
+  const availableProjects = projectsData?.data || [];
+
 
   // Photo field mapping state - maps template photo placeholders to CSV columns
   const [photoFieldMappings, setPhotoFieldMappings] = useState<Record<string, string>>({});
-  
+
   const [options, setOptions] = useState({
     includeBleed: true,
     includeCropMarks: true,
@@ -87,7 +117,10 @@ export function DesignerBatchPDFPanel({
     cardsPerRow: 0,
     cardsPerColumn: 0,
     cardSpacing: 5,
-    pageMargin: 10,
+    pageMarginTop: 10,
+    pageMarginBottom: 10,
+    pageMarginLeft: 10,
+    pageMarginRight: 10,
     separateFrontBack: false,
     side: 'both' as 'front' | 'back' | 'both',
     showSerialNumbers: true,
@@ -95,11 +128,11 @@ export function DesignerBatchPDFPanel({
     startingSerialNumber: 1,
     showPageNumbers: true,
   });
-  
+
   // Extract photo placeholders from template design
   const templatePhotoPlaceholders = useMemo(() => {
     const placeholders: string[] = [];
-    
+
     const extractFromDesign = (design: any) => {
       if (!design?.objects) return;
       design.objects.forEach((obj: any) => {
@@ -116,19 +149,35 @@ export function DesignerBatchPDFPanel({
             placeholders.push(name);
           }
         }
+        // Check for Masked Photo Objects
+        if ((obj.type === 'masked-photo' || obj.maskedPhoto) && (obj.maskConfig?.variableBinding || obj.variableBinding)) {
+          const binding = obj.maskConfig?.variableBinding || obj.variableBinding;
+          const name = typeof binding === 'string' ? binding : binding.field;
+          if (name && !placeholders.includes(name)) {
+            placeholders.push(name);
+          }
+        }
       });
     };
-    
+
     extractFromDesign(designJson);
     if (backDesignJson) extractFromDesign(backDesignJson);
-    
+
     // Add default photo placeholder
     if (placeholders.length === 0) {
       placeholders.push('photo');
     }
-    
+
     return placeholders;
   }, [designJson, backDesignJson]);
+
+  // 🔥 Auto-load project data when panel opens if projectId exists
+  useEffect(() => {
+    if (projectId && csvData.length === 0 && !isProcessing) {
+      handleLoadFromProject();
+    }
+  }, [projectId]);
+
 
   const previewInfo = useMemo(() => {
     if (csvData.length === 0) return null;
@@ -154,11 +203,17 @@ export function DesignerBatchPDFPanel({
     let pageWidth = options.orientation === 'landscape' ? pageDimensions.height : pageDimensions.width;
     let pageHeight = options.orientation === 'landscape' ? pageDimensions.width : pageDimensions.height;
 
-    const marginMm = options.pageMargin;
+    const marginT = options.pageMarginTop;
+    const marginB = options.pageMarginBottom;
+    const marginL = options.pageMarginLeft;
+    const marginR = options.pageMarginRight;
     const spacingMm = options.cardSpacing;
 
-    let cardsPerRow = options.cardsPerRow || Math.floor((pageWidth - marginMm * 2 + spacingMm) / (cardWidthWithBleed + spacingMm));
-    let cardsPerColumn = options.cardsPerColumn || Math.floor((pageHeight - marginMm * 2 + spacingMm) / (cardHeightWithBleed + spacingMm));
+    const availableWidth = pageWidth - marginL - marginR;
+    const availableHeight = pageHeight - marginT - marginB;
+
+    let cardsPerRow = options.cardsPerRow || Math.floor((availableWidth + spacingMm) / (cardWidthWithBleed + spacingMm));
+    let cardsPerColumn = options.cardsPerColumn || Math.floor((availableHeight + spacingMm) / (cardHeightWithBleed + spacingMm));
 
     cardsPerRow = Math.max(1, cardsPerRow);
     cardsPerColumn = Math.max(1, cardsPerColumn);
@@ -192,12 +247,12 @@ export function DesignerBatchPDFPanel({
     const reader = new FileReader();
     reader.onload = (e) => {
       let text = e.target?.result as string;
-      
+
       // Remove BOM if present
       if (text.charCodeAt(0) === 0xFEFF) {
         text = text.substring(1);
       }
-      
+
       Papa.parse(text, {
         header: true,
         skipEmptyLines: true,
@@ -209,7 +264,7 @@ export function DesignerBatchPDFPanel({
             }
             return col;
           });
-          
+
           const data = results.data as any[];
 
           if (cols.length === 0 || data.length === 0) {
@@ -234,6 +289,94 @@ export function DesignerBatchPDFPanel({
       setIsProcessing(false);
     };
     reader.readAsText(file);
+  };
+
+  const handleLoadFromProject = async () => {
+    if (!effectiveProjectId) {
+      toast.error('No project selected');
+      return;
+    }
+
+    setIsProcessing(true);
+    setError(null);
+
+    try {
+      const response = await apiService.dataRecordsAPI.getByProject(effectiveProjectId, { limit: 1000 });
+      const records = response?.data || response || [];
+
+      if (records.length === 0) {
+        setError('No data records found for this project');
+        setIsProcessing(false);
+        return;
+      }
+
+
+      // Extract column names from the first record's data_json
+      const first = records[0];
+      const dataJson = typeof first.data_json === 'string' ? JSON.parse(first.data_json) : first.data_json;
+      const cols = Object.keys(dataJson || {});
+
+      if (cols.length === 0) {
+        setError('Records contain no data fields');
+        setIsProcessing(false);
+        return;
+      }
+
+      // Map records to a flat object structure
+      const mappedData = records.map((record: any) => {
+        const data = typeof record.data_json === 'string' ? JSON.parse(record.data_json) : record.data_json;
+        const backendBase = 'http://localhost:3001';
+
+        let photoUrl = record.cropped_photo_url || record.photo_url || data.profilePic || data.photo || data.image;
+
+        // Resolve absolute URL
+        if (photoUrl && !photoUrl.startsWith('http') && !photoUrl.startsWith('data:')) {
+          if (photoUrl.startsWith('/')) {
+            photoUrl = `${backendBase}${photoUrl}`;
+          } else {
+            // Assume it's a file in project-photos
+            photoUrl = `${backendBase}/uploads/project-photos/${effectiveProjectId}/${photoUrl}`;
+          }
+
+        }
+
+        return {
+          ...data,
+          photo: photoUrl, // Standard field for placeholders
+          profilePic: photoUrl,
+          photo_url: record.photo_url,
+          cropped_photo_url: record.cropped_photo_url,
+          recordId: record.id
+        };
+      });
+
+      setColumns(cols);
+      setCsvData(mappedData);
+
+      // 🔥 Auto-map photo placeholders to relevant fields
+      const newMappings: Record<string, string> = {};
+      templatePhotoPlaceholders.forEach(placeholder => {
+        // Look for fields that might contain photos for this placeholder
+        const possibleFields = ['profilePic', 'photo', 'image', 'picture', 'photo_url', 'student_image', 'roll_no', 'id'];
+        const match = cols.find(c =>
+          c.toLowerCase() === placeholder.toLowerCase() ||
+          possibleFields.some(pf => c.toLowerCase().includes(pf.toLowerCase()))
+        );
+        if (match) {
+          newMappings[placeholder] = match;
+        }
+      });
+      if (Object.keys(newMappings).length > 0) {
+        setPhotoFieldMappings(prev => ({ ...prev, ...newMappings }));
+      }
+
+      toast.success(`Loaded ${mappedData.length} records from project`);
+    } catch (err: any) {
+      console.error('Failed to load project records:', err);
+      setError(`Failed to load records: ${err.message}`);
+    } finally {
+      setIsProcessing(false);
+    }
   };
 
   const handleClearData = () => {
@@ -266,12 +409,12 @@ export function DesignerBatchPDFPanel({
     try {
       const zip = new JSZip();
       const contents = await zip.loadAsync(file);
-      
+
       const imageFiles = Object.keys(contents.files).filter(filename => {
         const lower = filename.toLowerCase();
-        return !filename.startsWith('__MACOSX') && 
-               !filename.startsWith('.') &&
-               (lower.endsWith('.jpg') || lower.endsWith('.jpeg') || lower.endsWith('.png') || lower.endsWith('.webp'));
+        return !filename.startsWith('__MACOSX') &&
+          !filename.startsWith('.') &&
+          (lower.endsWith('.jpg') || lower.endsWith('.jpeg') || lower.endsWith('.png') || lower.endsWith('.webp'));
       });
 
       if (imageFiles.length === 0) {
@@ -288,14 +431,14 @@ export function DesignerBatchPDFPanel({
 
       for (let i = 0; i < imageFiles.length; i += UPLOAD_BATCH_SIZE) {
         const batch = imageFiles.slice(i, i + UPLOAD_BATCH_SIZE);
-        
+
         await Promise.all(batch.map(async (filename) => {
           try {
             const fileData = await contents.files[filename].async('blob');
             const baseName = filename.split('/').pop() || filename;
             const nameWithoutExt = baseName.replace(/\.[^.]+$/, '');
             const ext = baseName.split('.').pop()?.toLowerCase() || 'jpg';
-            
+
             const mimeTypes: Record<string, string> = {
               'jpg': 'image/jpeg',
               'jpeg': 'image/jpeg',
@@ -304,17 +447,14 @@ export function DesignerBatchPDFPanel({
             };
             const contentType = mimeTypes[ext] || 'image/jpeg';
             const typedBlob = new Blob([fileData], { type: contentType });
-            
-            const storagePath = `${projectId}/${baseName}`;
-            const { error: uploadError } = await supabase.storage
-              .from('project-photos')
-              .upload(storagePath, typedBlob, { contentType, upsert: true });
 
-            if (!uploadError) {
-              const { data: { publicUrl } } = supabase.storage
-                .from('project-photos')
-                .getPublicUrl(storagePath);
-              
+            const { url: publicUrl } = await apiService.imageAPI.uploadProjectPhoto({
+              file: typedBlob,
+              projectId,
+              fileName: baseName
+            });
+
+            if (publicUrl) {
               // Store with multiple key variations for matching
               photoMap.set(nameWithoutExt, publicUrl);
               photoMap.set(nameWithoutExt.toLowerCase(), publicUrl);
@@ -331,7 +471,7 @@ export function DesignerBatchPDFPanel({
 
       setUploadedPhotos(photoMap);
       toast.success(`Uploaded ${photoMap.size / 4} photos successfully`);
-      
+
       // Auto-detect photo field if not set
       if (!photoFieldName && columns.length > 0) {
         const photoFields = ['photo', 'image', 'picture', 'filename', 'file', 'photo_url', 'roll_no', 'rollno', 'id'];
@@ -347,142 +487,635 @@ export function DesignerBatchPDFPanel({
     }
   };
 
-  const handleGenerate = async () => {
+  // 🔥 Auto-fit text: shrinks font size if text overflows the textbox
+  const autoFitText = (textbox: any) => {
+    if (!textbox || (textbox.type !== 'text' && textbox.type !== 'textbox')) return;
+
+    const maxFontSize = textbox.fontSize || 18;
+    const minFontSize = textbox.minFontSize || 6;
+
+    let fontSize = maxFontSize;
+    textbox.set({ fontSize });
+
+    // Iteratively reduce font size until text fits
+    // Safety break to prevent infinite loops
+    let attempts = 0;
+    while (attempts < 50) {
+      const textHeight = textbox.calcTextHeight();
+      const textWidth = textbox.calcTextWidth();
+
+      if (textHeight <= textbox.height && textWidth <= textbox.width) {
+        break; // Text fits!
+      }
+
+      if (fontSize <= minFontSize) break;
+
+      fontSize -= 0.5;
+      textbox.set({ fontSize });
+      attempts++;
+    }
+  };
+
+  const loadTemplateTheFabric = async (design: any, width: number, height: number) => {
+    const tempCanvasEl = document.createElement('canvas');
+    tempCanvasEl.id = `fabric-batch-${Date.now()}-${Math.random()}`;
+    tempCanvasEl.width = width;
+    tempCanvasEl.height = height;
+    tempCanvasEl.style.position = 'absolute';
+    tempCanvasEl.style.left = '-10000px';
+    document.body.appendChild(tempCanvasEl);
+
+    const fabricCanvas = new FabricCanvas(tempCanvasEl.id, {
+      width: width,
+      height: height,
+      renderOnAddRemove: false,
+    });
+
+    if (design) {
+      // Pre-process design to ensure masked-photos load as images (since class might not be registered)
+      if (design.objects) {
+        design.objects.forEach((obj: any) => {
+          if (obj.type === 'masked-photo') {
+            obj.type = 'image';
+            obj.maskedPhoto = true; // Preserve flag
+          }
+        });
+      }
+
+      await fabricCanvas.loadFromJSON(design);
+      // Lock all objects for performance
+      fabricCanvas.getObjects().forEach((o: any) => {
+        o.selectable = false;
+        o.evented = false;
+      });
+      fabricCanvas.renderAll();
+    }
+
+    return { fabricCanvas, tempCanvasEl };
+  };
+
+  // Helper to generate a clipPath (mask) for a given shape and dimensions
+  const generateClipPath = (shape: string, width: number, height: number) => {
+    const minDim = Math.min(width, height);
+    let clipPath: any;
+
+    switch (shape) {
+      case 'circle':
+        clipPath = new Circle({
+          radius: minDim / 2,
+          originX: 'center',
+          originY: 'center',
+        });
+        break;
+      case 'rect':
+        clipPath = new Rect({
+          width: width,
+          height: height,
+          originX: 'center',
+          originY: 'center',
+        });
+        break;
+      case 'rounded-rect':
+        clipPath = new Rect({
+          width: width,
+          height: height,
+          rx: 15,
+          ry: 15,
+          originX: 'center',
+          originY: 'center',
+        });
+        break;
+      case 'star':
+        const outerRadius = minDim / 2;
+        const innerRadius = minDim / 4;
+        const pts = [];
+        for (let i = 0; i < 5; i++) {
+          const angle = (i * 4 * Math.PI) / 10 - Math.PI / 2;
+          pts.push({ x: Math.cos(angle) * outerRadius, y: Math.sin(angle) * outerRadius });
+          const angleInner = ((i * 4 + 2) * Math.PI) / 10 - Math.PI / 2;
+          pts.push({ x: Math.cos(angleInner) * innerRadius, y: Math.sin(angleInner) * innerRadius });
+        }
+        clipPath = new Polygon(pts, { originX: 'center', originY: 'center' });
+        break;
+      case 'heart':
+        clipPath = new Path('M 0,27.5 C 0,27.5 -25,12.5 -25,-12.5 C -25,-32.5 0,-32.5 0,-12.5 C 0,-32.5 25,-32.5 25,-12.5 C 25,12.5 0,27.5 0,27.5 Z', {
+          originX: 'center',
+          originY: 'center',
+        });
+        const heartScale = minDim / 60;
+        clipPath.set({ scaleX: heartScale, scaleY: heartScale });
+        break;
+      case 'triangle':
+        clipPath = new Polygon([{ x: 0, y: -minDim / 2 }, { x: minDim / 2, y: minDim / 2 }, { x: -minDim / 2, y: minDim / 2 }], { originX: 'center', originY: 'center' });
+        break;
+      case 'hexagon':
+        const hexPts = [];
+        for (let i = 0; i < 6; i++) {
+          const angle = (i * Math.PI) / 3 - Math.PI / 2;
+          hexPts.push({ x: (minDim / 2) * Math.cos(angle), y: (minDim / 2) * Math.sin(angle) });
+        }
+        clipPath = new Polygon(hexPts, { originX: 'center', originY: 'center' });
+        break;
+      case 'octagon':
+        const octPts = [];
+        for (let i = 0; i < 8; i++) {
+          const angle = (i * Math.PI) / 4 - Math.PI / 8;
+          octPts.push({ x: (minDim / 2) * Math.cos(angle), y: (minDim / 2) * Math.sin(angle) });
+        }
+        clipPath = new Polygon(octPts, { originX: 'center', originY: 'center' });
+        break;
+      case 'pentagon':
+        const pentPts = [];
+        for (let i = 0; i < 5; i++) {
+          const angle = (i * 2 * Math.PI) / 5 - Math.PI / 2;
+          pentPts.push({ x: (minDim / 2) * Math.cos(angle), y: (minDim / 2) * Math.sin(angle) });
+        }
+        clipPath = new Polygon(pentPts, { originX: 'center', originY: 'center' });
+        break;
+      case 'ellipse':
+        clipPath = new Ellipse({ rx: width / 2, ry: height / 2, originX: 'center', originY: 'center' });
+        break;
+    }
+    return clipPath;
+  };
+
+  const applyRecordToCanvas = async (fCanvas: FabricCanvas, recordData: any, photoUrls: Record<string, string | null>) => {
+    if (!fCanvas) return;
+
+    const objects = fCanvas.getObjects();
+    const imageLoads: Promise<void>[] = [];
+
+    for (const obj of objects) {
+      if (!obj) continue;
+
+      // Handle variable replacement in text
+      if (obj.type === 'textbox' || obj.type === 'text' || obj.type === 'i-text') {
+        let text = (obj as any).text || '';
+        // Simple variable replacement: {{field}}
+        // We can use the simple replacement logic or regex
+        let modified = false;
+
+        // Check if strict variable type
+        if ((obj as any).data?.type === 'variable' && (obj as any).data?.field) {
+          const field = (obj as any).data.field;
+          const val = recordData[field] || '';
+          text = String(val);
+          modified = true;
+        } else {
+          // Check for mustache syntax {{field}}
+          const updatedText = text.replace(/\{\{([^}]+)\}\}/g, (match: string, p1: string) => {
+            const field = p1.trim();
+            if (recordData[field] !== undefined) {
+              modified = true;
+              return String(recordData[field]);
+            }
+            return match;
+          });
+          if (modified) text = updatedText;
+        }
+
+        if (modified) {
+          (obj as any).set({ text });
+          // Auto fit if configured
+          if ((obj as any).data?.autoFontSize) {
+            autoFitText(obj);
+          }
+        }
+      }
+
+      // Handle Photo/Image replacement
+      // 1. Check for explicit photo placeholders or variable photos
+      if ((obj as any).data?.isPhotoPlaceholder ||
+        (obj as any).data?.type === 'photo-placeholder' ||
+        ((obj as any).data?.type === 'variable' && (obj as any).data?.isPhoto)) {
+
+        const placeholderName = (obj as any).data?.name || (obj as any).data?.field || (obj as any).data?.fieldName || 'photo';
+        const photoUrl = photoUrls[placeholderName];
+
+        if (photoUrl) {
+          imageLoads.push(new Promise<void>((resolve) => {
+            const originalObj = obj as any;
+            const existingClipPath = originalObj.clipPath; // Preserve clip path (e.g. circle mask)
+
+            FabricImage.fromURL(photoUrl, { crossOrigin: 'anonymous' }).then((img: FabricImage) => {
+              // Match dimensions and position
+              // We need to scale the image to 'cover' the placeholder box
+              const scaleX = (originalObj.width * originalObj.scaleX) / img.width;
+              const scaleY = (originalObj.height * originalObj.scaleY) / img.height;
+              const scale = Math.max(scaleX, scaleY); // 'Cover' mode
+
+              img.set({
+                left: originalObj.left, // Center alignment logic could be added here
+                top: originalObj.top,
+                scaleX: scale,
+                scaleY: scale,
+                opacity: 1,
+                originX: originalObj.originX,
+                originY: originalObj.originY,
+                clipPath: originalObj.clipPath || (originalObj.data?.shape && originalObj.data.shape !== 'rect' ? generateClipPath(originalObj.data.shape, originalObj.width, originalObj.height) : undefined)
+              });
+
+              // If original had a clip path, we might need to adjust content? 
+              // Actually if we replace the object, we just give the new image the same clipPath.
+
+              fCanvas.remove(originalObj);
+              fCanvas.add(img);
+              // Send to same stack level?
+              // Simple approach: just add it. Advanced: insertAt index.
+              resolve();
+            }).catch(() => resolve());
+          }));
+        }
+      }
+      // 2. Check for generic images with variableName
+      else if (obj.type === 'image' && (obj as any).data?.variableName) {
+        const varName = (obj as any).data.variableName;
+        const photoUrl = photoUrls[varName];
+        if (photoUrl) {
+          imageLoads.push(new Promise<void>((resolve) => {
+            const originalObj = obj as any;
+            FabricImage.fromURL(photoUrl, { crossOrigin: 'anonymous' }).then((img: FabricImage) => {
+              img.set({
+                left: originalObj.left,
+                top: originalObj.top,
+                scaleX: originalObj.scaleX,
+                scaleY: originalObj.scaleY,
+                angle: originalObj.angle,
+                originX: originalObj.originX,
+                originY: originalObj.originY,
+              });
+              fCanvas.remove(originalObj);
+              fCanvas.add(img);
+              resolve();
+            }).catch(() => resolve());
+          }));
+        }
+      }
+      // 3. Handle Masked Photo Objects
+      else if ((obj as any).maskedPhoto || (obj as any).type === 'masked-photo') {
+        const config = (obj as any).maskConfig;
+        const binding = config?.variableBinding || (obj as any).variableBinding;
+
+        console.log(`[Batch] Found masked photo object:`, { binding, config });
+
+        if (binding) {
+          const field = typeof binding === 'string' ? binding : binding.field;
+          const photoUrl = photoUrls[field];
+
+          console.log(`[Batch] Masked photo binding field: ${field}, resolved URL:`, photoUrl);
+
+          if (photoUrl) {
+            imageLoads.push(new Promise<void>((resolve) => {
+              const originalObj = obj as any;
+              // We use MaskedPhotoObject to render a new image with the new source
+              const maskedObj = new MaskedPhotoObject({
+                ...config,
+                photoSrc: photoUrl
+              });
+
+              console.log(`[Batch] Attempting to render masked object with url: ${photoUrl}`);
+
+              maskedObj.renderToFabric({ Image: FabricImage }, {}).then((newImg: any) => {
+                console.log(`[Batch] Successfully rendered masked object for field ${field}`);
+                newImg.set({
+                  left: originalObj.left,
+                  top: originalObj.top,
+                  scaleX: originalObj.scaleX,
+                  scaleY: originalObj.scaleY,
+                  angle: originalObj.angle,
+                  originX: originalObj.originX,
+                  originY: originalObj.originY,
+                });
+
+                fCanvas.remove(originalObj);
+                fCanvas.add(newImg);
+                resolve();
+              }).catch((err: any) => {
+                console.error(`[Batch] Failed to render masked object:`, err);
+                resolve();
+              });
+            }));
+          } else {
+            console.warn(`[Batch] No photo URL found for field: ${field}`);
+          }
+        }
+      }
+    }
+
+    if (imageLoads.length > 0) {
+      await Promise.all(imageLoads);
+    }
+    fCanvas.renderAll();
+  };
+
+  const handleGenerate = async (previewMode = false) => {
+    // Start generation process
     if (csvData.length === 0) {
       toast.error('Please upload CSV data first');
       return;
     }
 
-    setIsGenerating(true);
-    setProgress(0);
-    setGeneratedPDFs([]);
+    if (previewMode) {
+      setIsPreviewing(true);
+    } else {
+      setIsGenerating(true);
+      setProgress(0);
+      setGeneratedPDFs([]);
+    }
 
     try {
-      // Get canvas dimensions from the canvas object
-      const canvasWidth = canvas?.getWidth?.() || (widthMm * 3.78);
-      const canvasHeight = canvas?.getHeight?.() || (heightMm * 3.78);
-      
-      // Merge canvas dimensions into design_json
-      const enrichedDesignJson = designJson ? {
-        ...designJson,
-        width: canvasWidth,
-        height: canvasHeight,
-      } : null;
-      
-      const enrichedBackDesignJson = backDesignJson && backCanvas ? {
-        ...backDesignJson,
-        width: backCanvas.getWidth?.() || canvasWidth,
-        height: backCanvas.getHeight?.() || canvasHeight,
-      } : backDesignJson;
 
-      const templateData = {
-        name: templateName,
-        width_mm: widthMm,
-        height_mm: heightMm,
-        design_json: enrichedDesignJson,
-        back_design_json: enrichedBackDesignJson,
-        has_back_side: hasBackSide,
-        category,
-        canvas_width: canvasWidth,
-        canvas_height: canvasHeight,
-      };
+      // 1. Setup PDF and loop based on configured options
+      // Calculate layout
+      const pageInfo = previewInfo;
+      if (!pageInfo) throw new Error('Could not calculate page layout');
 
-      // Transform CSV data to match expected format with photo URLs
-      const records = csvData.map((row, index) => {
-        // Build photo URLs map for all photo placeholders
+      // Use higher DPI for print quality
+      const dpi = 300;
+      const pxScale = dpi / 25.4; // px per mm
+      // Fabric canvas usually runs at 96 DPI (3.78 px/mm). We should match the export resolution.
+      const exportMultiplier = 300 / 96; // ~3.125
+
+      // Get canvas JSONs
+      const customProps = ['id', 'name', 'maskedPhoto', 'maskConfig', 'variableBinding', 'data'];
+      const design = canvas?.toObject(customProps);
+      // Ensure width/height are in the JSON for the loader
+      if (design) {
+        design.width = canvas.getWidth();
+        design.height = canvas.getHeight();
+      }
+
+      const backDesign = hasBackSide && backCanvas ? backCanvas.toObject(customProps) : null;
+      if (backDesign && backCanvas) {
+        backDesign.width = backCanvas.getWidth();
+        backDesign.height = backCanvas.getHeight();
+      }
+
+      // We will create hidden canvases to render each card
+      // We use the same dimensions as the screen canvas but render to higher res image
+      const canvasWidth = canvas?.getWidth() || (widthMm * 3.78);
+      const canvasHeight = canvas?.getHeight() || (heightMm * 3.78);
+
+      // Create hidden canvases
+      const { fabricCanvas: frontRenderCanvas, tempCanvasEl: frontEl } = await loadTemplateTheFabric(design, canvasWidth, canvasHeight);
+      let backRenderCanvas: FabricCanvas | null = null;
+      let backEl: HTMLCanvasElement | null = null;
+
+      if (hasBackSide && backDesign) {
+        const res = await loadTemplateTheFabric(backDesign, canvasWidth, canvasHeight);
+        backRenderCanvas = res.fabricCanvas;
+        backEl = res.tempCanvasEl;
+      }
+
+      // Initialize PDF
+      const pdf = new jsPDF({
+        orientation: options.orientation,
+        unit: 'mm',
+        format: options.pageSize === 'card' ? [widthMm + (options.includeBleed ? 6 : 0), heightMm + (options.includeBleed ? 6 : 0)] : options.pageSize.toLowerCase()
+      });
+
+      const records = previewMode ? csvData.slice(0, pageInfo.cardsPerPage) : csvData;
+
+      const cardsPerPage = pageInfo.cardsPerPage;
+
+      const totalPages = Math.ceil(records.length / cardsPerPage);
+
+      // Layout calculations
+      const cardW = widthMm;
+      const cardH = heightMm;
+      // If bleed is ON, the image we put on PDF should include bleed? 
+      // Usually bleed means the printed area is larger.
+      // JS PDF logic:
+      // If imposition (A4), we place cards at specific X,Y.
+      // If crop marks enabled, we draw lines.
+
+      // For simplicity in this implementation:
+      // We'll capture the canvas as is. If the canvas represents the cut size, we can't easily add bleed unless the canvas ALREADY has bleed.
+      // Assuming the canvas IS the design size (widthMm x heightMm). 
+      // The "Check Bleed" option usually visualizes it.
+
+      const startX = options.pageMarginLeft;
+      const startY = options.pageMarginTop;
+      const spaceX = options.cardSpacing;
+      const spaceY = options.cardSpacing;
+
+      toast.info(`Generating ${totalPages} pages...`);
+
+      for (let i = 0; i < records.length; i++) {
+        const row = records[i];
+
+        // Prepare photo URLs for this record
         const photoUrls: Record<string, string | null> = {};
-        
         templatePhotoPlaceholders.forEach(placeholder => {
+          // ... (existing photo mapping logic) ...
           let photoUrl: string | null = null;
-          
-          // Check if there's a mapping for this placeholder
           const mappedColumn = photoFieldMappings[placeholder] || photoFieldName;
-          
+
+          // 1. Check for manual ZIP upload match first (if any)
           if (uploadedPhotos.size > 0 && mappedColumn && row[mappedColumn]) {
-            const fieldValue = String(row[mappedColumn]).trim();
-            photoUrl = uploadedPhotos.get(fieldValue) || 
-                       uploadedPhotos.get(fieldValue.toLowerCase()) ||
-                       uploadedPhotos.get(fieldValue.replace(/\.[^.]+$/, '')) || null;
+            const val = String(row[mappedColumn]).trim();
+            photoUrl = uploadedPhotos.get(val) || uploadedPhotos.get(val.toLowerCase()) || uploadedPhotos.get(val.replace(/\.[^.]+$/, ''));
           }
-          
-          // Fallback: try common fields if not found
+
+          // 2. Fallback: Check for URL in record data (loaded from Project)
+          if (!photoUrl) {
+            // First check specific mapped column if it contains a URL
+            if (mappedColumn && row[mappedColumn] && (String(row[mappedColumn]).startsWith('http') || String(row[mappedColumn]).startsWith('data:'))) {
+              photoUrl = String(row[mappedColumn]);
+            }
+            // Then check standard fields populated by handleLoadFromProject
+            else if (row.photo && (String(row.photo).startsWith('http') || String(row.photo).startsWith('data:'))) {
+              photoUrl = row.photo;
+            } else if (row.profilePic && (String(row.profilePic).startsWith('http') || String(row.profilePic).startsWith('data:'))) {
+              photoUrl = row.profilePic;
+            } else if (row.cropped_photo_url) {
+              photoUrl = row.cropped_photo_url;
+            } else if (row.photo_url) {
+              photoUrl = row.photo_url;
+            }
+          }
+
+          // 3. Fallback: aggressive search in uploaded photos if enabled
           if (!photoUrl && uploadedPhotos.size > 0) {
             const tryFields = ['roll_no', 'rollno', 'id', 'student_id', 'filename', 'name'];
             for (const field of tryFields) {
               const val = row[field] || row[field.toLowerCase()];
               if (val) {
                 const strVal = String(val).trim();
-                photoUrl = uploadedPhotos.get(strVal) || 
-                           uploadedPhotos.get(strVal.toLowerCase()) || null;
-                if (photoUrl) break;
+                const found = uploadedPhotos.get(strVal) || uploadedPhotos.get(strVal.toLowerCase());
+                if (found) {
+                  photoUrl = found;
+                  break;
+                }
               }
             }
           }
-          
-          photoUrls[placeholder] = photoUrl;
-        });
-        
-        // Use first photo URL as the main photo_url for backwards compatibility
-        const mainPhotoUrl = photoUrls[templatePhotoPlaceholders[0]] || null;
-        
-        return {
-          id: `batch-${index}`,
-          record_number: index + 1,
-          data_json: row,
-          photo_url: mainPhotoUrl,
-          photo_urls: photoUrls, // All mapped photo URLs
-        };
-      });
 
-      const numBatches = Math.ceil(records.length / BATCH_SIZE);
-      setTotalBatches(numBatches);
-      
-      toast.info(`Starting PDF generation for ${records.length} cards in ${numBatches} batch${numBatches > 1 ? 'es' : ''}...`);
-
-      const allResults: { side: string; url: string }[] = [];
-
-      for (let batchIndex = 0; batchIndex < numBatches; batchIndex++) {
-        setCurrentBatch(batchIndex + 1);
-        const start = batchIndex * BATCH_SIZE;
-        const end = Math.min(start + BATCH_SIZE, records.length);
-        const batchRecords = records.slice(start, end);
-
-        const { data, error } = await supabase.functions.invoke('generate-pdf', {
-          body: {
-            projectId: 'batch-generation',
-            templateData,
-            records: batchRecords,
-            options: {
-              ...options,
-              cardsPerRow: options.cardsPerRow || undefined,
-              cardsPerColumn: options.cardsPerColumn || undefined,
-            },
-            batchIndex,
-            totalBatches: numBatches,
-          },
+          if (photoUrl) {
+            photoUrls[placeholder] = photoUrl;
+          }
         });
 
-        if (error) throw error;
+        // Render Front
+        // Reload design to reset state (or just update objects)
+        // Updating is faster than reloading JSON every time
+        // But we must revert changes from previous record if we update in place?
+        // Actually updating text is non-destructive to structure. Images replace objects.
+        // Re-loading JSON is safest but slower. 
+        // Optimization: Let's reload JSON every time to ensure clean state for images.
+        await frontRenderCanvas.loadFromJSON(design);
+        await applyRecordToCanvas(frontRenderCanvas, row, photoUrls);
 
-        if (data.urls) {
-          allResults.push(...data.urls);
-        } else if (data.url) {
-          allResults.push({ side: 'front', url: data.url });
+        const frontImgData = frontRenderCanvas.toDataURL({ format: 'png', multiplier: exportMultiplier });
+
+        // Calculate Position
+        const pageIndex = Math.floor(i / cardsPerPage);
+        const posInPage = i % cardsPerPage;
+
+        // Add new page if needed (and not first page)
+        if (posInPage === 0 && i > 0) {
+          pdf.addPage();
         }
 
-        const progressPercent = Math.round(((batchIndex + 1) / numBatches) * 100);
-        setProgress(progressPercent);
+        const colIndex = posInPage % pageInfo.cardsPerRow;
+        const rowIndex = Math.floor(posInPage / pageInfo.cardsPerRow);
+
+        const xPos = startX + colIndex * (cardW + spaceX);
+        const yPos = startY + rowIndex * (cardH + spaceY);
+
+        // Place Front Image
+        // Note: If bleed is enabled in options, does the canvas happen to be larger?
+        // The canvas size is fixed to widthMm.
+        // If the user wants bleed, they should design with bleed.
+        // Here we just place the image.
+        pdf.addImage(frontImgData, 'PNG', xPos, yPos, cardW, cardH);
+
+        // Add Crop Marks
+        if (options.includeCropMarks) {
+          pdf.setLineWidth(0.1);
+          pdf.setDrawColor(0, 0, 0); // Black marks
+          // TL
+          pdf.line(xPos - 2, yPos, xPos - 5, yPos); // Horiz
+          pdf.line(xPos, yPos - 2, xPos, yPos - 5); // Vert
+          // TR
+          pdf.line(xPos + cardW + 2, yPos, xPos + cardW + 5, yPos);
+          pdf.line(xPos + cardW, yPos - 2, xPos + cardW, yPos - 5);
+          // BL
+          pdf.line(xPos - 2, yPos + cardH, xPos - 5, yPos + cardH);
+          pdf.line(xPos, yPos + cardH + 2, xPos, yPos + cardH + 5);
+          // BR
+          pdf.line(xPos + cardW + 2, yPos + cardH, xPos + cardW + 5, yPos + cardH);
+          pdf.line(xPos + cardW, yPos + cardH + 2, xPos + cardW, yPos + cardH + 5);
+        }
+
+        // Handle Back Side (If applicable)
+        // For now, simpler implementation: If back side exists, we probably need a separate page loop 
+        // OR alternating pages (Front Page, Back Page) if doing double-sided print manually
+        // OR sequential pages if page-per-card.
+        // The Logic: Usually for imposition, you print all fronts, then all backs.
+
+        // Update progress
+        setProgress(Math.round(((i + 1) / records.length) * 100));
       }
 
-      setGeneratedPDFs(allResults);
-      toast.success(`PDF generated successfully! ${allResults.length} file(s) created.`);
-      setProgress(100);
+      // Handle Back Side Generation (New pages after all fronts)
+      if (hasBackSide && backRenderCanvas && backDesign) {
+        pdf.addPage(); // Start back section
+        toast.info("Generating back sides...");
+
+        // We need to mirror the layout for back side if printing double sided on tumble?
+        // Usually col 1 becomes col N for back side alignment.
+        // Let's implement standard "left-to-right" placement for now, user might handle paper flip
+
+        for (let i = 0; i < records.length; i++) {
+          const row = records[i];
+          // Reuse photo urls if needed (rare for back, but possible)
+
+          await backRenderCanvas.loadFromJSON(backDesign);
+          await applyRecordToCanvas(backRenderCanvas, row, {}); // No photos usually on back? or reuse
+
+          const backImgData = backRenderCanvas.toDataURL({ format: 'png', multiplier: exportMultiplier });
+
+          const pageIndex = Math.floor(i / cardsPerPage);
+          const posInPage = i % cardsPerPage;
+
+          // Add new page check
+          // We need to track pages relative to back-start
+          if (posInPage === 0 && i > 0) {
+            pdf.addPage();
+          }
+
+          // Mirror column for back side alignment
+          // If Front is Col 0, Back should be Col (Max-0)? 
+          // Standard ID card printers do this automatically. 
+          // Manual sheet printing: 
+          // Col 0 (Left) on Front matches Col N (Right) on Back.
+          const colIndexRaw = posInPage % pageInfo.cardsPerRow;
+          // Mirror column index
+          const colIndex = (pageInfo.cardsPerRow - 1) - colIndexRaw;
+
+          const rowIndex = Math.floor(posInPage / pageInfo.cardsPerRow);
+
+          const xPos = startX + colIndex * (cardW + spaceX);
+          const yPos = startY + rowIndex * (cardH + spaceY);
+
+          pdf.addImage(backImgData, 'PNG', xPos, yPos, cardW, cardH);
+
+          // Crop marks for back
+          if (options.includeCropMarks) {
+            pdf.setLineWidth(0.1);
+            pdf.setDrawColor(0, 0, 0);
+            // ... (same as front but at new pos)
+            // TL
+            pdf.line(xPos - 2, yPos, xPos - 5, yPos);
+            pdf.line(xPos, yPos - 2, xPos, yPos - 5);
+            // TR
+            pdf.line(xPos + cardW + 2, yPos, xPos + cardW + 5, yPos);
+            pdf.line(xPos + cardW, yPos - 2, xPos + cardW, yPos - 5);
+            // BL
+            pdf.line(xPos - 2, yPos + cardH, xPos - 5, yPos + cardH);
+            pdf.line(xPos, yPos + cardH + 2, xPos, yPos + cardH + 5);
+            // BR
+            pdf.line(xPos + cardW + 2, yPos + cardH, xPos + cardW + 5, yPos + cardH);
+            pdf.line(xPos + cardW, yPos + cardH + 2, xPos + cardW, yPos + cardH + 5);
+          }
+        }
+      }
+
+      // Save PDF
+      // Save or Open PDF
+      if (previewMode) {
+        const blob = pdf.output('blob');
+        const url = URL.createObjectURL(blob);
+        window.open(url, '_blank');
+        toast.info('Preview opened in new tab');
+      } else {
+        const filename = `${templateName}_Batch_${new Date().getTime()}.pdf`;
+        pdf.save(filename);
+        toast.success(`PDF generated successfully!`);
+      }
+
+
+      // Cleanup
+      if (frontEl && frontEl.parentNode) {
+        frontEl.parentNode.removeChild(frontEl);
+      }
+      if (backEl && backEl.parentNode) {
+        backEl.parentNode.removeChild(backEl);
+      }
+
+      toast.success(`PDF generated successfully!`);
+
     } catch (error: any) {
       console.error('PDF generation failed:', error);
       toast.error('Failed to generate PDF: ' + error.message);
     } finally {
-      setIsGenerating(false);
-      setCurrentBatch(0);
+      if (previewMode) {
+        setIsPreviewing(false);
+      } else {
+        setIsGenerating(false);
+        setProgress(100);
+      }
     }
   };
 
@@ -507,7 +1140,7 @@ export function DesignerBatchPDFPanel({
                 <div className="p-2 bg-primary/10 rounded-full">
                   <Upload className="h-6 w-6 text-primary" />
                 </div>
-                
+
                 <div>
                   <p className="text-sm font-medium mb-1">Import CSV Data</p>
                   <p className="text-xs text-muted-foreground">
@@ -518,7 +1151,7 @@ export function DesignerBatchPDFPanel({
                 <label htmlFor="csv-upload">
                   <Button variant="outline" size="sm" disabled={isProcessing} asChild>
                     <span>
-                      {isProcessing ? 'Processing...' : 'Choose File'}
+                      {isProcessing ? 'Processing...' : 'Import CSV'}
                     </span>
                   </Button>
                 </label>
@@ -529,6 +1162,44 @@ export function DesignerBatchPDFPanel({
                   onChange={handleFileUpload}
                   className="hidden"
                 />
+
+                <div className="flex items-center gap-2 w-full mt-2">
+                  <div className="h-px flex-1 bg-border"></div>
+                  <span className="text-[10px] text-muted-foreground uppercase">OR</span>
+                  <div className="h-px flex-1 bg-border"></div>
+                </div>
+
+                {!projectId && availableProjects.length > 0 && (
+                  <div className="mt-2 space-y-1">
+                    <Label className="text-xs">Select Project</Label>
+                    <Select
+                      value={selectedProjectId}
+                      onValueChange={setSelectedProjectId}
+                    >
+                      <SelectTrigger className="h-8 text-xs bg-background w-full">
+                        <SelectValue placeholder="Select a project..." />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {availableProjects.map((p: any) => (
+                          <SelectItem key={p.id} value={p.id} className="text-xs">
+                            {p.project_name || p.name}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </div>
+                )}
+
+                <Button
+                  variant="default"
+                  size="sm"
+                  className="w-full mt-2"
+                  disabled={isProcessing || !effectiveProjectId}
+                  onClick={handleLoadFromProject}
+                >
+                  <Database className="h-3.5 w-3.5 mr-2" />
+                  Load Records from Project
+                </Button>
               </div>
 
               {error && (
@@ -547,9 +1218,9 @@ export function DesignerBatchPDFPanel({
                     <FileSpreadsheet className="h-4 w-4" />
                     Data Loaded
                   </span>
-                  <Button 
-                    variant="ghost" 
-                    size="icon" 
+                  <Button
+                    variant="ghost"
+                    size="icon"
                     className="h-6 w-6 text-destructive"
                     onClick={handleClearData}
                   >
@@ -634,17 +1305,17 @@ export function DesignerBatchPDFPanel({
                   <FolderArchive className="h-3 w-3" />
                   Photo Upload (Optional)
                 </div>
-                
+
                 {uploadedPhotos.size === 0 ? (
                   <div className="space-y-2">
                     <p className="text-xs text-muted-foreground">
                       Upload a ZIP with photos. Filenames should match a field in your CSV (e.g., roll_no.jpg).
                     </p>
                     <label htmlFor="zip-upload">
-                      <Button 
-                        variant="outline" 
-                        size="sm" 
-                        disabled={isUploadingPhotos} 
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        disabled={isUploadingPhotos}
                         className="w-full"
                         asChild
                       >
@@ -680,14 +1351,14 @@ export function DesignerBatchPDFPanel({
                       <CheckCircle2 className="h-3 w-3" />
                       {Math.floor(uploadedPhotos.size / 4)} photos uploaded
                     </div>
-                    
+
                     {/* Photo Field Mapping */}
                     <div className="space-y-2 p-2 bg-muted/30 rounded-md">
                       <Label className="text-xs font-medium">Map Photo Placeholders to CSV Columns</Label>
                       <p className="text-xs text-muted-foreground mb-2">
                         Match template photo placeholders with your CSV column for filename lookup.
                       </p>
-                      
+
                       {templatePhotoPlaceholders.map((placeholder) => (
                         <div key={placeholder} className="flex items-center gap-2">
                           <span className="text-xs font-medium min-w-20 truncate" title={placeholder}>
@@ -716,15 +1387,18 @@ export function DesignerBatchPDFPanel({
                         </div>
                       ))}
                     </div>
-                    
-                    <Button 
-                      variant="ghost" 
-                      size="sm" 
+
+                    <Button
+                      variant="ghost"
+                      size="sm"
                       className="w-full text-xs text-muted-foreground"
                       onClick={() => {
                         setUploadedPhotos(new Map());
                         setPhotoFieldName('');
+                        // Clear manual selection if not prop-driven
+                        if (!projectId) setSelectedProjectId(undefined);
                         setPhotoFieldMappings({});
+                        handleClearData();
                       }}
                     >
                       <Trash2 className="h-3 w-3 mr-1" />
@@ -737,7 +1411,7 @@ export function DesignerBatchPDFPanel({
               {/* PDF Options */}
               <div className="space-y-3">
                 <Label className="text-xs font-medium">PDF Options</Label>
-                
+
                 <div className="grid grid-cols-2 gap-2">
                   <div className="space-y-1">
                     <Label className="text-xs">Page Size</Label>
@@ -776,28 +1450,71 @@ export function DesignerBatchPDFPanel({
                 </div>
 
                 {options.pageSize !== 'card' && (
-                  <div className="grid grid-cols-2 gap-2">
-                    <div className="space-y-1">
-                      <Label className="text-xs">Spacing (mm)</Label>
-                      <Input
-                        type="number"
-                        min={0}
-                        max={50}
-                        value={options.cardSpacing}
-                        onChange={(e) => setOptions({ ...options, cardSpacing: parseInt(e.target.value) || 0 })}
-                        className="h-8 text-xs bg-background"
-                      />
+                  <div className="space-y-3">
+                    <div className="grid grid-cols-2 gap-2">
+                      <div className="space-y-1">
+                        <Label className="text-[10px] uppercase font-bold text-muted-foreground">Spacing (mm)</Label>
+                        <Input
+                          type="number"
+                          min={0}
+                          max={50}
+                          value={options.cardSpacing}
+                          onChange={(e) => setOptions({ ...options, cardSpacing: parseInt(e.target.value) || 0 })}
+                          className="h-8 text-xs bg-background"
+                        />
+                      </div>
+                      <div className="space-y-1 opacity-50 cursor-not-allowed">
+                        <Label className="text-[10px] uppercase font-bold text-muted-foreground">Auto-Detection</Label>
+                        <div className="h-8 flex items-center px-3 border rounded-md text-[10px] bg-muted">
+                          {previewInfo?.cardsPerRow}x{previewInfo?.cardsPerColumn} Grid
+                        </div>
+                      </div>
                     </div>
-                    <div className="space-y-1">
-                      <Label className="text-xs">Margin (mm)</Label>
-                      <Input
-                        type="number"
-                        min={0}
-                        max={50}
-                        value={options.pageMargin}
-                        onChange={(e) => setOptions({ ...options, pageMargin: parseInt(e.target.value) || 0 })}
-                        className="h-8 text-xs bg-background"
-                      />
+
+                    <div className="space-y-2 p-3 bg-muted/30 rounded-lg border border-border/50">
+                      <Label className="text-[10px] uppercase font-bold text-muted-foreground">Page Margins (mm)</Label>
+                      <div className="grid grid-cols-2 gap-x-3 gap-y-2 pt-1">
+                        <div className="space-y-1">
+                          <Label className="text-[10px]">Top</Label>
+                          <Input
+                            type="number"
+                            min={0}
+                            value={options.pageMarginTop}
+                            onChange={(e) => setOptions({ ...options, pageMarginTop: parseInt(e.target.value) || 0 })}
+                            className="h-7 text-xs bg-background"
+                          />
+                        </div>
+                        <div className="space-y-1">
+                          <Label className="text-[10px]">Bottom</Label>
+                          <Input
+                            type="number"
+                            min={0}
+                            value={options.pageMarginBottom}
+                            onChange={(e) => setOptions({ ...options, pageMarginBottom: parseInt(e.target.value) || 0 })}
+                            className="h-7 text-xs bg-background"
+                          />
+                        </div>
+                        <div className="space-y-1">
+                          <Label className="text-[10px]">Left</Label>
+                          <Input
+                            type="number"
+                            min={0}
+                            value={options.pageMarginLeft}
+                            onChange={(e) => setOptions({ ...options, pageMarginLeft: parseInt(e.target.value) || 0 })}
+                            className="h-7 text-xs bg-background"
+                          />
+                        </div>
+                        <div className="space-y-1">
+                          <Label className="text-[10px]">Right</Label>
+                          <Input
+                            type="number"
+                            min={0}
+                            value={options.pageMarginRight}
+                            onChange={(e) => setOptions({ ...options, pageMarginRight: parseInt(e.target.value) || 0 })}
+                            className="h-7 text-xs bg-background"
+                          />
+                        </div>
+                      </div>
                     </div>
                   </div>
                 )}
@@ -881,7 +1598,7 @@ export function DesignerBatchPDFPanel({
                 <div className="space-y-2">
                   <div className="flex items-center justify-between text-xs">
                     <span className="text-muted-foreground">
-                      {totalBatches > 1 
+                      {totalBatches > 1
                         ? `Batch ${currentBatch} of ${totalBatches}...`
                         : 'Generating...'
                       }
@@ -917,23 +1634,46 @@ export function DesignerBatchPDFPanel({
               )}
 
               {/* Generate Button */}
-              <Button 
-                className="w-full" 
-                onClick={handleGenerate}
-                disabled={isGenerating || csvData.length === 0}
-              >
-                {isGenerating ? (
-                  <>
-                    <Loader2 className="h-4 w-4 mr-2 animate-spin" />
-                    Generating...
-                  </>
-                ) : (
-                  <>
-                    <FileText className="h-4 w-4 mr-2" />
-                    Generate {csvData.length} PDFs
-                  </>
-                )}
-              </Button>
+              <div className="pt-2 flex gap-2">
+                <Button
+
+                  variant="outline"
+                  className="flex-1"
+                  disabled={isGenerating || isProcessing || isPreviewing || csvData.length === 0}
+                  onClick={() => handleGenerate(true)}
+                >
+                  {isPreviewing ? (
+                    <>
+                      <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                      Previewing...
+                    </>
+                  ) : (
+                    <>
+                      <Eye className="h-4 w-4 mr-2" />
+                      Preview PDF
+                    </>
+                  )}
+                </Button>
+
+                <Button
+                  className="flex-1"
+                  disabled={isGenerating || isProcessing || isPreviewing || csvData.length === 0}
+                  onClick={() => handleGenerate(false)}
+                >
+                  {isGenerating ? (
+                    <>
+                      <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                      Generating...
+                    </>
+                  ) : (
+                    <>
+                      <Download className="h-4 w-4 mr-2" />
+                      Generate PDF
+                    </>
+                  )}
+                </Button>
+              </div>
+
             </>
           )}
 

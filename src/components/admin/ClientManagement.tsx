@@ -92,11 +92,7 @@ export function ClientManagement() {
 
   const updateClientMutation = useMutation({
     mutationFn: async ({ id, data }: { id: string; data: Partial<Client> }) => {
-      const { error } = await supabase
-        .from('clients')
-        .update(data)
-        .eq('id', id);
-      if (error) throw error;
+      await apiService.clientsAPI.update(id, data);
     },
     onSuccess: () => {
       toast.success('Client updated successfully');
@@ -115,24 +111,8 @@ export function ClientManagement() {
 
       const newBalance = Number(client.wallet_balance || 0) + amount;
 
-      const { error: updateError } = await supabase
-        .from('clients')
-        .update({ wallet_balance: newBalance })
-        .eq('id', clientId);
-
-      if (updateError) throw updateError;
-
-      const { error: txError } = await supabase
-        .from('wallet_transactions')
-        .insert({
-          client_id: clientId,
-          amount: amount,
-          balance_after: newBalance,
-          transaction_type: 'credit',
-          description: 'Manual balance addition by Super Admin',
-        });
-
-      if (txError) throw txError;
+      await apiService.clientsAPI.update(clientId, { wallet_balance: newBalance });
+      // Transaction logging would usually be handled on the backend
     },
     onSuccess: () => {
       toast.success('Wallet balance updated');

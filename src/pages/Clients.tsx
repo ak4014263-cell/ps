@@ -42,19 +42,17 @@ export default function Clients() {
     enabled: !!user?.id,
   });
 
-  // Get all clients and filter by vendor
-  const { data: clients = [], isLoading } = useQuery({
-    queryKey: ['clients', vendorData?.id],
+  // Get all clients and filter by vendor on server
+  const { data: clientsData, isLoading } = useQuery({
+    queryKey: ['clients', vendorData?.id, searchQuery],
     queryFn: async () => {
       try {
-        const response = await apiService.clientsAPI.getAll();
-        // Extract data from response structure { success, data: [] }
-        const allClients = (response.data || response || []);
-        // Filter by vendor_id
-        if (vendorData?.id && vendorData.id !== 'default-vendor') {
-          return allClients.filter((c: any) => c.vendor_id === vendorData.id);
-        }
-        return allClients;
+        const vendorId = vendorData?.id && vendorData.id !== 'default-vendor' ? vendorData.id : undefined;
+        const response = await apiService.clientsAPI.getAll({
+          vendor_id: vendorId,
+          keyword: searchQuery || undefined
+        });
+        return (response.data || response || []);
       } catch (error) {
         console.error('Failed to fetch clients:', error);
         return [];
@@ -63,12 +61,8 @@ export default function Clients() {
     enabled: !!vendorData?.id,
   });
 
-  const filteredClients = clients.filter((client) =>
-    searchQuery === '' ||
-    (client.client_name || '').toLowerCase().includes(searchQuery.toLowerCase()) ||
-    (client.company || '').toLowerCase().includes(searchQuery.toLowerCase()) ||
-    (client.email || '').toLowerCase().includes(searchQuery.toLowerCase())
-  );
+  const clients = clientsData || [];
+  const filteredClients = clients;
 
   if (isLoading) {
     return (
@@ -122,7 +116,7 @@ export default function Clients() {
               </TableRow>
             ) : (
               filteredClients.map((client) => (
-                <TableRow 
+                <TableRow
                   key={client.id}
                   className="cursor-pointer hover:bg-muted/50"
                   onClick={() => navigate(`/clients/${client.id}`)}

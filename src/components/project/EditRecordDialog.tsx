@@ -58,12 +58,7 @@ export function EditRecordDialog({ record, open, onOpenChange, projectId }: Edit
     if (!record) return;
     setIsSaving(true);
     try {
-      const { error } = await supabase
-        .from('data_records')
-        .update({ data_json: editData })
-        .eq('id', record.id);
-
-      if (error) throw error;
+      await apiService.dataRecordsAPI.update(record.id, { data_json: editData });
 
       toast.success('Record updated');
       queryClient.invalidateQueries({ queryKey: ['project-records', projectId] });
@@ -84,7 +79,7 @@ export function EditRecordDialog({ record, open, onOpenChange, projectId }: Edit
         <DialogHeader>
           <DialogTitle>Edit Record #{record.record_number}</DialogTitle>
         </DialogHeader>
-        
+
         <ScrollArea className="max-h-[60vh]">
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4 p-1">
             {editableFields.map(field => (

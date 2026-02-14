@@ -12,18 +12,33 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible';
 import { DesignerGradientPicker, GradientConfig, gradientConfigToFabric } from './DesignerGradientPicker';
 import { Gradient } from 'fabric';
+import { useQuery } from '@tanstack/react-query';
+import { apiService } from '@/lib/api';
 import { applyAutoFontSize } from '@/lib/autoFontSize';
-import { 
+import { VDPText } from '@/lib/vdpText';
+import { DesignerVDPPanel } from './DesignerVDPPanel';
+import {
   Bold, Italic, Underline, Strikethrough, ChevronDown, Palette,
   ArrowUpLeft, ArrowUp, ArrowUpRight, ArrowLeft, Circle, ArrowRight,
-  ArrowDownLeft, ArrowDown, ArrowDownRight, Maximize2, Database, 
+  ArrowDownLeft, ArrowDown, ArrowDownRight, Maximize2, Database,
   Type, Move, Sparkles, AlignLeft, AlignCenter, AlignRight, RotateCcw,
-  Square, Image as ImageIcon, ChevronRight, QrCode, Barcode, RefreshCw, Upload
+  Square, Image as ImageIcon, ChevronRight, QrCode, Barcode, RefreshCw, Upload, Star,
+  Triangle, Hexagon, Heart
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { generateBarcodeDataUrl, generateQRCodeDataUrl, BarcodeFormat } from '@/lib/codeGenerators';
 import { FabricImage } from 'fabric';
 import { toast } from 'sonner';
+
+const STANDARD_FIELDS = [
+  'S.No.', 'Name', 'schoolCode', 'admNo', 'firstName', 'lastName', 'dob',
+  'className', 'sec', 'gender', 'profilePic', 'link', 'fatherName', 'motherName',
+  'fatherMobNo', 'email', 'admDate', 'session', 'fatherAadhaar', 'fatherOccupation',
+  'fatherProfilePic', 'fatherWhatsApp', 'motherAadhaar', 'motherMobNo',
+  'motherOccupation', 'motherWhatsApp', 'bloodGroup', 'religion', 'caste',
+  'subCaste', 'schoolHouse', 'address', 'transportMode', 'rfid', 'Status',
+  'Group', 'Class'
+];
 
 const BARCODE_FORMATS: { value: BarcodeFormat; label: string }[] = [
   { value: 'CODE128', label: 'Code 128' },
@@ -35,7 +50,7 @@ const BARCODE_FORMATS: { value: BarcodeFormat; label: string }[] = [
 ];
 
 const GOOGLE_FONTS = [
-  'Arial', 'Helvetica', 'Times New Roman', 'Georgia', 'Verdana', 
+  'Arial', 'Helvetica', 'Times New Roman', 'Georgia', 'Verdana',
   'Courier New', 'Impact', 'Comic Sans MS', 'Trebuchet MS', 'Tahoma',
   'Roboto', 'Open Sans', 'Lato', 'Montserrat', 'Oswald', 'Raleway',
   'Poppins', 'Source Sans Pro', 'Ubuntu', 'Merriweather', 'Playfair Display',
@@ -169,7 +184,7 @@ interface SectionProps {
 
 function Section({ title, icon, defaultOpen = true, children }: SectionProps) {
   const [isOpen, setIsOpen] = useState(defaultOpen);
-  
+
   return (
     <Collapsible open={isOpen} onOpenChange={setIsOpen} className="group">
       <CollapsibleTrigger className="flex items-center justify-between w-full py-2 px-1 hover:bg-muted/50 rounded-md transition-colors">
@@ -241,16 +256,45 @@ interface DesignerPropertiesPanelProps {
   customFonts?: string[];
   safeZoneMm?: number;
   mmToPixels?: number;
+  onApplyMask?: (shape: string) => void;
+  onEditMask?: (obj: any) => void;
+  projectId?: string;
 }
 
-export function DesignerPropertiesPanel({ 
-  selectedObject, 
-  canvas, 
-  onUpdate, 
+export function DesignerPropertiesPanel({
+  selectedObject,
+  canvas,
+  onUpdate,
   customFonts = [],
   safeZoneMm = 4,
-  mmToPixels = 3.78
+  mmToPixels = 3.78,
+  onApplyMask,
+  onEditMask,
+  projectId
 }: DesignerPropertiesPanelProps) {
+  const { data: projectColumns = [] } = useQuery({
+    queryKey: ['project-columns', projectId],
+    queryFn: async () => {
+      if (!projectId) return [];
+      try {
+        const response = await apiService.dataRecordsAPI.getByProject(projectId, { limit: 1 });
+        const records = response?.data || response || [];
+        if (records.length > 0) {
+          const first = records[0];
+          const data = typeof first.data_json === 'string' ? JSON.parse(first.data_json) : first.data_json;
+          return Object.keys(data || {});
+        }
+        return [];
+      } catch (err) {
+        console.error('Failed to fetch columns:', err);
+        return [];
+      }
+    },
+    enabled: !!projectId
+  });
+
+  const allColumns = [...new Set([...STANDARD_FIELDS, ...projectColumns])].sort();
+
   const [properties, setProperties] = useState({
     left: 0,
     top: 0,
@@ -304,18 +348,23 @@ export function DesignerPropertiesPanel({
     photoBorderColor: '#9ca3af',
     photoBorderStyle: 'dashed' as 'solid' | 'dashed' | 'none',
   });
-  
+
   const [isRegenerating, setIsRegenerating] = useState(false);
   const maskInputRef = useRef<HTMLInputElement>(null);
-  
+
   const [gradientConfig, setGradientConfig] = useState<GradientConfig | null>(null);
 
   useEffect(() => {
     if (!selectedObject) return;
 
-    const bgColor = selectedObject.backgroundColor || selectedObject.textBackgroundColor || '';
-    const isGradient = typeof selectedObject.fill === 'object';
-    
+    const isVariableBox = selectedObject.data?.type === 'variable-box';
+    const textObj = selectedObject.data?.textObject;
+    // For variable boxes, most text properties should be sampled from the inner text object
+    const textTarget = (isVariableBox && textObj) ? textObj : selectedObject;
+
+    const bgColor = textTarget.backgroundColor || textTarget.textBackgroundColor || '';
+    const isGradient = typeof textTarget.fill === 'object';
+
     setProperties({
       left: Math.round(selectedObject.left || 0),
       top: Math.round(selectedObject.top || 0),
@@ -324,27 +373,27 @@ export function DesignerPropertiesPanel({
       angle: Math.round(selectedObject.angle || 0),
       scaleX: selectedObject.scaleX || 1,
       scaleY: selectedObject.scaleY || 1,
-      fill: typeof selectedObject.fill === 'string' ? selectedObject.fill : '#000000',
+      fill: typeof textTarget.fill === 'string' ? textTarget.fill : '#000000',
       stroke: selectedObject.stroke || '#000000',
       strokeWidth: selectedObject.strokeWidth || 0,
       opacity: selectedObject.opacity || 1,
-      text: selectedObject.text || '',
-      fontSize: selectedObject.fontSize || 16,
-      fontFamily: selectedObject.fontFamily || 'Arial',
-      fontWeight: selectedObject.fontWeight || 'normal',
-      fontStyle: selectedObject.fontStyle || 'normal',
-      underline: selectedObject.underline || false,
-      linethrough: selectedObject.linethrough || false,
-      textAlign: selectedObject.textAlign || 'left',
-      lineHeight: selectedObject.lineHeight || 1.2,
-      charSpacing: selectedObject.charSpacing || 0,
+      text: textTarget.text || '',
+      fontSize: textTarget.fontSize || 16,
+      fontFamily: textTarget.fontFamily || 'Arial',
+      fontWeight: textTarget.fontWeight || 'normal',
+      fontStyle: textTarget.fontStyle || 'normal',
+      underline: textTarget.underline || false,
+      linethrough: textTarget.linethrough || false,
+      textAlign: textTarget.textAlign || 'left',
+      lineHeight: textTarget.lineHeight || 1.2,
+      charSpacing: textTarget.charSpacing || 0,
       textBackgroundColor: bgColor,
       hasTextBackground: !!bgColor,
-      shadowEnabled: !!selectedObject.shadow,
-      shadowColor: selectedObject.shadow?.color || '#000000',
-      shadowBlur: selectedObject.shadow?.blur || 10,
-      shadowOffsetX: selectedObject.shadow?.offsetX || 5,
-      shadowOffsetY: selectedObject.shadow?.offsetY || 5,
+      shadowEnabled: !!textTarget.shadow,
+      shadowColor: textTarget.shadow?.color || '#000000',
+      shadowBlur: textTarget.shadow?.blur || 10,
+      shadowOffsetX: textTarget.shadow?.offsetX || 5,
+      shadowOffsetY: textTarget.shadow?.offsetY || 5,
       rx: selectedObject.rx || 0,
       ry: selectedObject.ry || 0,
       useGradient: isGradient,
@@ -352,7 +401,7 @@ export function DesignerPropertiesPanel({
       curveRadius: selectedObject.data?.curveRadius || 0,
       textCase: selectedObject.data?.textCase || 'none',
       autoFontSize: selectedObject.data?.autoFontSize || false,
-      wordWrap: selectedObject.splitByGrapheme !== false,
+      wordWrap: textTarget.splitByGrapheme !== false,
       dataField: selectedObject.data?.dataField || '',
       // Barcode properties
       barcodeFormat: selectedObject.data?.barcodeFormat || 'CODE128',
@@ -381,16 +430,35 @@ export function DesignerPropertiesPanel({
     } else if (key === 'height') {
       selectedObject.set('scaleY', value / selectedObject.height);
     } else if (key === 'text') {
-      selectedObject.set('text', value);
-    } else if (key === 'hasTextBackground') {
-      if (value) {
-        selectedObject.set('backgroundColor', properties.textBackgroundColor || '#ffffff');
+      if (selectedObject.data?.type === 'variable-box' && selectedObject.data?.textObject) {
+        selectedObject.data.textObject.set('text', value);
       } else {
-        selectedObject.set('backgroundColor', '');
+        selectedObject.set('text', value);
+      }
+    } else if (key === 'hasTextBackground') {
+      const target = (selectedObject.data?.type === 'variable-box' && selectedObject.data?.textObject) ? selectedObject.data.textObject : selectedObject;
+      if (value) {
+        target.set('backgroundColor', properties.textBackgroundColor || '#ffffff');
+      } else {
+        target.set('backgroundColor', '');
       }
     } else if (key === 'textBackgroundColor') {
+      const target = (selectedObject.data?.type === 'variable-box' && selectedObject.data?.textObject) ? selectedObject.data.textObject : selectedObject;
       if (properties.hasTextBackground) {
-        selectedObject.set('backgroundColor', value);
+        target.set('backgroundColor', value);
+      }
+    } else if (key === 'fill') {
+      // If variable box is selected, proxy 'fill' (color) to the nested text object
+      if (selectedObject.data?.type === 'variable-box' && selectedObject.data?.textObject) {
+        selectedObject.data.textObject.set('fill', value);
+      } else {
+        selectedObject.set('fill', value);
+      }
+    } else if (['fontSize', 'fontFamily', 'fontWeight', 'fontStyle', 'underline', 'linethrough', 'textAlign', 'charSpacing'].includes(key)) {
+      if (selectedObject.data?.type === 'variable-box' && selectedObject.data?.textObject) {
+        selectedObject.data.textObject.set(key, value);
+      } else {
+        selectedObject.set(key, value);
       }
     } else if (key === 'textCase') {
       if (!selectedObject.data) selectedObject.data = {};
@@ -406,7 +474,7 @@ export function DesignerPropertiesPanel({
       selectedObject.set('splitByGrapheme', value);
       if (!selectedObject.data) selectedObject.data = {};
       selectedObject.data.wordWrap = value;
-      
+
       // If auto font size is enabled, recalculate font size with the new wrap setting
       if (selectedObject.data?.autoFontSize) {
         applyAutoFontSize(selectedObject, canvas);
@@ -415,17 +483,18 @@ export function DesignerPropertiesPanel({
       if (!selectedObject.data) selectedObject.data = {};
       selectedObject.data.dataField = value;
     } else if (key === 'lineHeight') {
+      const target = (selectedObject.data?.type === 'variable-box' && selectedObject.data?.textObject) ? selectedObject.data.textObject : selectedObject;
       // Update lineHeight and automatically adjust box height to accommodate the change
-      const oldLineHeight = selectedObject.lineHeight || 1.2;
+      const oldLineHeight = target.lineHeight || 1.2;
       const heightRatio = value / oldLineHeight;
-      
+
       // Update the textbox with new lineHeight
-      selectedObject.set('lineHeight', value);
-      
+      target.set('lineHeight', value);
+
       // Automatically scale the height to accommodate the new lineHeight
       // This ensures the text remains visible when line height is increased
-      const currentHeight = selectedObject.height || 100;
-      selectedObject.set('scaleY', (selectedObject.scaleY || 1) * heightRatio);
+      const currentHeight = target.height || 100;
+      target.set('scaleY', (target.scaleY || 1) * heightRatio);
 
       // Fabric v6: force Textbox layout + cache refresh
       try {
@@ -442,7 +511,7 @@ export function DesignerPropertiesPanel({
       } catch {
         // ignore
       }
-      
+
       // If auto font size is enabled, recalculate font size with the new line height
       if (selectedObject.data?.autoFontSize) {
         applyAutoFontSize(selectedObject, canvas);
@@ -476,45 +545,45 @@ export function DesignerPropertiesPanel({
 
   const fitToSafeZone = () => {
     if (!selectedObject || !canvas) return;
-    
+
     const canvasWidth = canvas.width || 300;
     const canvasHeight = canvas.height || 200;
     const safeZonePx = safeZoneMm * mmToPixels;
-    
+
     const safeWidth = canvasWidth - (safeZonePx * 2);
     const safeHeight = canvasHeight - (safeZonePx * 2);
-    
+
     selectedObject.set({
       left: safeZonePx,
       top: safeZonePx,
       scaleX: safeWidth / selectedObject.width,
       scaleY: safeHeight / selectedObject.height,
     });
-    
+
     canvas.requestRenderAll();
     onUpdate();
   };
 
   const alignToSafeZone = (position: string) => {
     if (!selectedObject || !canvas) return;
-    
+
     const canvasWidth = canvas.width || 300;
     const canvasHeight = canvas.height || 200;
     const safeZonePx = safeZoneMm * mmToPixels;
-    
+
     const objWidth = selectedObject.width * (selectedObject.scaleX || 1);
     const objHeight = selectedObject.height * (selectedObject.scaleY || 1);
-    
+
     const safeLeft = safeZonePx;
     const safeTop = safeZonePx;
     const safeRight = canvasWidth - safeZonePx;
     const safeBottom = canvasHeight - safeZonePx;
     const safeCenterX = (safeLeft + safeRight) / 2;
     const safeCenterY = (safeTop + safeBottom) / 2;
-    
+
     let newLeft = selectedObject.left;
     let newTop = selectedObject.top;
-    
+
     switch (position) {
       case 'top-left':
         newLeft = safeLeft;
@@ -553,7 +622,7 @@ export function DesignerPropertiesPanel({
         newTop = safeBottom - objHeight;
         break;
     }
-    
+
     selectedObject.set({ left: newLeft, top: newTop });
     canvas.requestRenderAll();
     onUpdate();
@@ -565,12 +634,12 @@ export function DesignerPropertiesPanel({
       const width = selectedObject.width * (selectedObject.scaleX || 1);
       const height = selectedObject.height * (selectedObject.scaleY || 1);
       const fabricGradient = gradientConfigToFabric(config, width, height);
-      
+
       const colorStops = Object.entries(fabricGradient.colorStops).map(([offset, color]) => ({
         offset: parseFloat(offset),
         color: color as string,
       }));
-      
+
       let gradient;
       if (fabricGradient.type === 'radial') {
         gradient = new Gradient<'radial'>({
@@ -585,7 +654,7 @@ export function DesignerPropertiesPanel({
           colorStops,
         });
       }
-      
+
       selectedObject.set('fill', gradient);
       canvas.requestRenderAll();
       onUpdate();
@@ -598,7 +667,7 @@ export function DesignerPropertiesPanel({
   // Regenerate barcode with new settings
   const regenerateBarcode = async () => {
     if (!selectedObject || !canvas || !selectedObject.data?.isBarcode) return;
-    
+
     setIsRegenerating(true);
     try {
       const dataUrl = await generateBarcodeDataUrl('ID12345', {
@@ -607,23 +676,23 @@ export function DesignerPropertiesPanel({
         height: properties.barcodeHeight,
         displayValue: properties.showValue,
       });
-      
+
       FabricImage.fromURL(dataUrl, { crossOrigin: 'anonymous' }).then((img) => {
         const currentLeft = selectedObject.left;
         const currentTop = selectedObject.top;
         const currentScaleX = selectedObject.scaleX || 1;
         const currentScaleY = selectedObject.scaleY || 1;
-        
+
         // Remove old object
         canvas.remove(selectedObject);
-        
+
         // Configure new image
         img.set({
           left: currentLeft,
           top: currentTop,
           scaleX: currentScaleX,
           scaleY: currentScaleY,
-          data: { 
+          data: {
             ...selectedObject.data,
             barcodeFormat: properties.barcodeFormat,
             barcodeWidth: properties.barcodeWidth,
@@ -631,7 +700,7 @@ export function DesignerPropertiesPanel({
             showValue: properties.showValue,
           },
         });
-        
+
         canvas.add(img);
         canvas.setActiveObject(img);
         canvas.requestRenderAll();
@@ -648,37 +717,37 @@ export function DesignerPropertiesPanel({
   // Regenerate QR code with new settings
   const regenerateQRCode = async () => {
     if (!selectedObject || !canvas || !selectedObject.data?.isQR) return;
-    
+
     setIsRegenerating(true);
     try {
       const dataUrl = await generateQRCodeDataUrl('https://example.com', {
         width: properties.qrSize,
         color: { dark: properties.qrDarkColor, light: properties.qrLightColor },
       });
-      
+
       FabricImage.fromURL(dataUrl, { crossOrigin: 'anonymous' }).then((img) => {
         const currentLeft = selectedObject.left;
         const currentTop = selectedObject.top;
         const currentScaleX = selectedObject.scaleX || 1;
         const currentScaleY = selectedObject.scaleY || 1;
-        
+
         // Remove old object
         canvas.remove(selectedObject);
-        
+
         // Configure new image
         img.set({
           left: currentLeft,
           top: currentTop,
           scaleX: currentScaleX,
           scaleY: currentScaleY,
-          data: { 
+          data: {
             ...selectedObject.data,
             qrSize: properties.qrSize,
             qrDarkColor: properties.qrDarkColor,
             qrLightColor: properties.qrLightColor,
           },
         });
-        
+
         canvas.add(img);
         canvas.setActiveObject(img);
         canvas.requestRenderAll();
@@ -695,40 +764,48 @@ export function DesignerPropertiesPanel({
   // Update photo border
   const updatePhotoBorder = (style: 'solid' | 'dashed' | 'none', width?: number, color?: string) => {
     if (!selectedObject || !canvas) return;
-    
+
     const borderWidth = width ?? properties.photoBorderWidth;
     const borderColor = color ?? properties.photoBorderColor;
-    
+
     if (style === 'none') {
       selectedObject.set({ strokeWidth: 0, stroke: null, strokeDashArray: null });
     } else if (style === 'dashed') {
-      selectedObject.set({ 
-        strokeWidth: borderWidth, 
-        stroke: borderColor, 
-        strokeDashArray: [5, 5] 
+      selectedObject.set({
+        strokeWidth: borderWidth,
+        stroke: borderColor,
+        strokeDashArray: [5, 5]
       });
     } else {
-      selectedObject.set({ 
-        strokeWidth: borderWidth, 
-        stroke: borderColor, 
-        strokeDashArray: null 
+      selectedObject.set({
+        strokeWidth: borderWidth,
+        stroke: borderColor,
+        strokeDashArray: null
       });
     }
-    
+
     canvas.requestRenderAll();
     onUpdate();
   };
 
-  const isTextObject = selectedObject?.type === 'textbox' || selectedObject?.type === 'i-text';
+  const isTextObject = selectedObject?.type === 'textbox' || selectedObject?.type === 'i-text' || selectedObject?.data?.type === 'variable-box';
   const isImageObject = selectedObject?.type === 'image';
   const isBarcodeObject = selectedObject?.data?.isBarcode === true;
   const isQRObject = selectedObject?.data?.isQR === true;
   const isPhotoObject = selectedObject?.data?.isPhoto === true;
+  const isVDPObject = selectedObject instanceof VDPText;
+  const isMaskedPhoto = selectedObject?.type === 'masked-photo' || selectedObject?.maskedPhoto;
   const allFonts = [...GOOGLE_FONTS, ...customFonts.filter(f => !GOOGLE_FONTS.includes(f))];
 
   // Get object type label
   const getObjectTypeLabel = () => {
     if (!selectedObject) return '';
+    if (selectedObject.type === 'masked-photo' || selectedObject.maskedPhoto) return 'Masked Photo';
+    if (selectedObject.data?.type === 'variable-box') return 'Variable';
+    if (selectedObject.data?.isBarcode) return 'Barcode';
+    if (selectedObject.data?.isQR) return 'QR Code';
+    if (selectedObject.data?.isPhoto) return 'Photo Placeholder';
+
     switch (selectedObject.type) {
       case 'textbox':
       case 'i-text':
@@ -754,6 +831,10 @@ export function DesignerPropertiesPanel({
 
   const getObjectIcon = () => {
     if (!selectedObject) return <Square className="h-4 w-4" />;
+    if (selectedObject.data?.type === 'variable-box') return <Database className="h-4 w-4" />;
+    if (selectedObject.data?.isBarcode) return <Barcode className="h-4 w-4" />;
+    if (selectedObject.data?.isQR) return <QrCode className="h-4 w-4" />;
+
     switch (selectedObject.type) {
       case 'textbox':
       case 'i-text':
@@ -795,10 +876,21 @@ export function DesignerPropertiesPanel({
           </div>
         </div>
 
+        {/* VDP Tool Panel */}
+        {isVDPObject && (
+          <div className="mb-4 bg-primary/5 border border-primary/10 rounded-lg p-3">
+            <DesignerVDPPanel
+              selectedObject={selectedObject}
+              canvas={canvas}
+              onUpdate={onUpdate}
+            />
+          </div>
+        )}
+
         {/* Quick Actions */}
         <div className="flex gap-1 mb-4">
-          <Button 
-            variant="outline" 
+          <Button
+            variant="outline"
             size="sm"
             className="flex-1 h-8 text-xs"
             onClick={fitToSafeZone}
@@ -806,8 +898,8 @@ export function DesignerPropertiesPanel({
             <Maximize2 className="h-3 w-3 mr-1" />
             Fit
           </Button>
-          <Button 
-            variant="outline" 
+          <Button
+            variant="outline"
             size="sm"
             className="flex-1 h-8 text-xs"
             onClick={() => alignToSafeZone('center')}
@@ -815,8 +907,8 @@ export function DesignerPropertiesPanel({
             <Circle className="h-3 w-3 mr-1" />
             Center
           </Button>
-          <Button 
-            variant="outline" 
+          <Button
+            variant="outline"
             size="sm"
             className="flex-1 h-8 text-xs"
             onClick={() => updateProperty('angle', 0)}
@@ -869,7 +961,7 @@ export function DesignerPropertiesPanel({
                 />
               </div>
             </div>
-            
+
             <div className="flex items-center gap-2 pt-2">
               <div className="flex-1 space-y-1">
                 <Label className="text-[10px] text-muted-foreground">Rotation</Label>
@@ -910,10 +1002,10 @@ export function DesignerPropertiesPanel({
                   { pos: 'bottom-center', icon: ArrowDown },
                   { pos: 'bottom-right', icon: ArrowDownRight },
                 ].map(({ pos, icon: Icon }) => (
-                  <Button 
+                  <Button
                     key={pos}
-                    variant="outline" 
-                    size="icon" 
+                    variant="outline"
+                    size="icon"
                     className="h-7 w-full"
                     onClick={() => alignToSafeZone(pos)}
                   >
@@ -1274,7 +1366,7 @@ export function DesignerPropertiesPanel({
                     </SelectContent>
                   </Select>
                 </div>
-                
+
                 <div className="grid grid-cols-2 gap-2">
                   <div className="space-y-1">
                     <Label className="text-[10px] text-muted-foreground">Bar Width</Label>
@@ -1300,7 +1392,7 @@ export function DesignerPropertiesPanel({
                     />
                   </div>
                 </div>
-                
+
                 <div className="flex items-center justify-between">
                   <Label className="text-xs">Show Value</Label>
                   <Switch
@@ -1308,9 +1400,9 @@ export function DesignerPropertiesPanel({
                     onCheckedChange={(v) => setProperties(prev => ({ ...prev, showValue: v }))}
                   />
                 </div>
-                
-                <Button 
-                  onClick={regenerateBarcode} 
+
+                <Button
+                  onClick={regenerateBarcode}
                   disabled={isRegenerating}
                   className="w-full h-8 text-xs"
                   variant="outline"
@@ -1337,7 +1429,7 @@ export function DesignerPropertiesPanel({
                     className="py-2"
                   />
                 </div>
-                
+
                 <div className="grid grid-cols-2 gap-2">
                   <div className="space-y-1">
                     <Label className="text-[10px] text-muted-foreground">Dark Color</Label>
@@ -1354,9 +1446,9 @@ export function DesignerPropertiesPanel({
                     />
                   </div>
                 </div>
-                
-                <Button 
-                  onClick={regenerateQRCode} 
+
+                <Button
+                  onClick={regenerateQRCode}
                   disabled={isRegenerating}
                   className="w-full h-8 text-xs"
                   variant="outline"
@@ -1364,6 +1456,25 @@ export function DesignerPropertiesPanel({
                   <RefreshCw className={cn("h-3 w-3 mr-1", isRegenerating && "animate-spin")} />
                   Apply Changes
                 </Button>
+              </div>
+            </Section>
+          )}
+
+          {/* Masked Photo Settings Section */}
+          {isMaskedPhoto && (
+            <Section title="Masking Settings" icon={<Sparkles className="h-3.5 w-3.5" />} defaultOpen={true}>
+              <div className="space-y-3">
+                <Button
+                  onClick={() => onEditMask?.(selectedObject)}
+                  className="w-full h-8 text-xs"
+                  variant="secondary"
+                >
+                  <Sparkles className="h-3 w-3 mr-1" />
+                  Edit Photo Mask
+                </Button>
+                <div className="text-[10px] text-muted-foreground text-center">
+                  Click to open the advanced masking tool to change shape, effects, or photo.
+                </div>
               </div>
             </Section>
           )}
@@ -1377,22 +1488,22 @@ export function DesignerPropertiesPanel({
                   <div className="space-y-1">
                     <Label className="text-[10px] text-muted-foreground">Photo Preview</Label>
                     <div className="relative rounded-md overflow-hidden border bg-muted aspect-square">
-                      <img 
-                        src={selectedObject.data.previewUrl} 
+                      <img
+                        src={selectedObject.data.previewUrl}
                         alt="Photo preview"
                         className="w-full h-full object-cover"
                       />
                     </div>
                   </div>
                 )}
-                
+
                 <div className="space-y-1">
                   <Label className="text-[10px] text-muted-foreground">Current Shape</Label>
                   <div className="text-xs bg-muted px-2 py-1 rounded capitalize">
                     {properties.photoShape || 'Rectangle'}
                   </div>
                 </div>
-                
+
                 <div className="space-y-1">
                   <Label className="text-[10px] text-muted-foreground">Border Style</Label>
                   <div className="flex gap-1">
@@ -1431,7 +1542,7 @@ export function DesignerPropertiesPanel({
                     </Button>
                   </div>
                 </div>
-                
+
                 {properties.photoBorderStyle !== 'none' && (
                   <>
                     <InputRow label="Border Width">
@@ -1447,7 +1558,7 @@ export function DesignerPropertiesPanel({
                         suffix="px"
                       />
                     </InputRow>
-                    
+
                     <InputRow label="Border Color">
                       <ColorInput
                         value={properties.photoBorderColor}
@@ -1459,7 +1570,7 @@ export function DesignerPropertiesPanel({
                     </InputRow>
                   </>
                 )}
-                
+
                 <div className="space-y-1">
                   <Label className="text-[10px] text-muted-foreground">Custom Mask</Label>
                   <input
@@ -1486,9 +1597,9 @@ export function DesignerPropertiesPanel({
                       }
                     }}
                   />
-                  <Button 
-                    variant="outline" 
-                    size="sm" 
+                  <Button
+                    variant="outline"
+                    size="sm"
                     className="w-full h-8 text-xs"
                     onClick={() => maskInputRef.current?.click()}
                   >
@@ -1505,16 +1616,106 @@ export function DesignerPropertiesPanel({
 
           {/* Data Linking Section */}
           <Section title="Data Link" icon={<Database className="h-3.5 w-3.5" />} defaultOpen={false}>
-            <p className="text-[10px] text-muted-foreground">
+            <p className="text-[10px] text-muted-foreground mb-2">
               Link to a data column for batch generation
             </p>
-            <Input
-              value={properties.dataField}
-              onChange={(e) => updateProperty('dataField', e.target.value)}
-              placeholder="e.g., {{name}}"
-              className="h-8 text-xs font-mono"
-            />
+            <div className="space-y-2">
+              <Input
+                value={properties.dataField}
+                onChange={(e) => updateProperty('dataField', e.target.value)}
+                placeholder="e.g., {{name}}"
+                className="h-8 text-xs font-mono"
+              />
+              <Select
+                onValueChange={(val) => updateProperty('dataField', `{{${val}}}`)}
+              >
+                <SelectTrigger className="h-8 text-xs">
+                  <SelectValue placeholder="Load from Column..." />
+                </SelectTrigger>
+                <SelectContent className="max-h-[200px]">
+                  {allColumns.map((col: string) => (
+                    <SelectItem key={col} value={col} className="text-xs">
+                      {col}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
           </Section>
+
+          {/* Masking Section */}
+          {onApplyMask && (
+            <Section title="Shape Mask" icon={<Circle className="h-3.5 w-3.5" />} defaultOpen={false}>
+              <p className="text-[10px] text-muted-foreground mb-2">
+                Apply a shape mask to this object
+              </p>
+              <div className="grid grid-cols-4 gap-2">
+                <Button
+                  variant="outline"
+                  size="icon"
+                  className="h-8 w-8"
+                  onClick={() => onApplyMask('none')}
+                  title="No Mask"
+                >
+                  <Square className="h-4 w-4 stroke-dashed" />
+                </Button>
+                <Button
+                  variant="outline"
+                  size="icon"
+                  className="h-8 w-8"
+                  onClick={() => onApplyMask('rect')}
+                  title="Rectangle"
+                >
+                  <Square className="h-4 w-4" />
+                </Button>
+                <Button
+                  variant="outline"
+                  size="icon"
+                  className="h-8 w-8"
+                  onClick={() => onApplyMask('circle')}
+                  title="Circle"
+                >
+                  <Circle className="h-4 w-4" />
+                </Button>
+                <Button
+                  variant="outline"
+                  size="icon"
+                  className="h-8 w-8"
+                  onClick={() => onApplyMask('star')}
+                  title="Star"
+                >
+                  <Star className="h-4 w-4" />
+                </Button>
+                <Button
+                  variant="outline"
+                  size="icon"
+                  className="h-8 w-8"
+                  onClick={() => onApplyMask('heart')}
+                  title="Heart"
+                >
+                  <Heart className="h-4 w-4" />
+                </Button>
+                <Button
+                  variant="outline"
+                  size="icon"
+                  className="h-8 w-8"
+                  onClick={() => onApplyMask('triangle')}
+                  title="Triangle"
+                >
+                  <Triangle className="h-4 w-4" />
+                </Button>
+                <Button
+                  variant="outline"
+                  size="icon"
+                  className="h-8 w-8"
+                  onClick={() => onApplyMask('hexagon')}
+                  title="Hexagon"
+                >
+                  <Hexagon className="h-4 w-4" />
+                </Button>
+              </div>
+            </Section>
+          )}
         </div>
       </div>
     </ScrollArea>

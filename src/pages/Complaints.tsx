@@ -1,5 +1,6 @@
 import { useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
+import { apiService } from '@/lib/api';
 // Supabase disconnected - using XAMPP MySQL
 import { useAuth } from '@/hooks/useAuth';
 import { useUserRole } from '@/hooks/useUserRole';
@@ -23,37 +24,26 @@ export default function Complaints() {
   const { isSuperAdmin } = useUserRole();
   const [searchQuery, setSearchQuery] = useState('');
 
-  const { data: complaints = [], isLoading } = useQuery({
-    queryKey: ['complaints', user?.id],
+  const { data: complaintsData, isLoading } = useQuery({
+    queryKey: ['complaints', user?.id, searchQuery],
     queryFn: async () => {
       if (!user?.id) return [];
-      
-      let query = supabase
-        .from('complaints')
-        .select(`
-          *,
-          client:clients(name, institution_name),
-          vendor:vendors(business_name)
-        `)
-        .order('created_at', { ascending: false });
 
-      // If not super admin, filter by user
+      const params: any = {
+        keyword: searchQuery || undefined
+      };
       if (!isSuperAdmin) {
-        query = query.or(`vendor_id.eq.${user.id},client_id.eq.${user.id}`);
+        params.vendor_id = user.id;
       }
 
-      const { data, error } = await query;
-      if (error) throw error;
-      return data;
+      const response = await apiService.complaintsAPI.getAll(params);
+      return (response.data || response || []);
     },
     enabled: !!user?.id,
   });
 
-  const filteredComplaints = complaints.filter((complaint) =>
-    searchQuery === '' ||
-    complaint.title.toLowerCase().includes(searchQuery.toLowerCase()) ||
-    complaint.description.toLowerCase().includes(searchQuery.toLowerCase())
-  );
+  const complaints = complaintsData || [];
+  const filteredComplaints = complaints;
 
   if (isLoading) {
     return (
@@ -123,8 +113,8 @@ export default function Complaints() {
                         complaint.priority === 'high'
                           ? 'destructive'
                           : complaint.priority === 'medium'
-                          ? 'default'
-                          : 'secondary'
+                            ? 'default'
+                            : 'secondary'
                       }
                       className="text-xs"
                     >
@@ -137,14 +127,13 @@ export default function Complaints() {
                         complaint.status === 'resolved'
                           ? 'default'
                           : complaint.status === 'in_progress'
-                          ? 'secondary'
-                          : 'outline'
+                            ? 'secondary'
+                            : 'outline'
                       }
-                      className={`text-xs ${
-                        complaint.status === 'resolved'
-                          ? 'bg-green-500 hover:bg-green-600'
-                          : ''
-                      }`}
+                      className={`text-xs ${complaint.status === 'resolved'
+                        ? 'bg-green-500 hover:bg-green-600'
+                        : ''
+                        }`}
                     >
                       {complaint.status?.replace(/_/g, ' ').toUpperCase()}
                     </Badge>

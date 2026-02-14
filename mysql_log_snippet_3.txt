@@ -1,0 +1,20 @@
+﻿2026-02-09 17:55:04 0 [Note] InnoDB: Initializing buffer pool, total size = 16M, instances = 1, chunk size = 16M
+2026-02-09 17:55:04 0 [Note] InnoDB: Completed initialization of buffer pool
+2026-02-09 17:55:04 0 [ERROR] InnoDB: Page [page id: space=0, page number=46] log sequence number 647913212 is in the future! Current system log sequence number 645873694.
+2026-02-09 17:55:04 0 [ERROR] InnoDB: Your database may be corrupt or you may have copied the InnoDB tablespace but not the InnoDB log files. Please refer to https://mariadb.com/kb/en/library/innodb-recovery-modes/ for information about forcing recovery.
+2026-02-09 17:55:04 0 [ERROR] InnoDB: Page [page id: space=0, page number=427] log sequence number 647918917 is in the future! Current system log sequence number 645873694.
+2026-02-09 17:55:04 0 [ERROR] InnoDB: Your database may be corrupt or you may have copied the InnoDB tablespace but not the InnoDB log files. Please refer to https://mariadb.com/kb/en/library/innodb-recovery-modes/ for information about forcing recovery.
+2026-02-09 17:55:04 0 [ERROR] InnoDB: Page [page id: space=0, page number=48] log sequence number 650690510 is in the future! Current system log sequence number 645873694.
+2026-02-09 17:55:04 0 [ERROR] InnoDB: Your database may be corrupt or you may have copied the InnoDB tablespace but not the InnoDB log files. Please refer to https://mariadb.com/kb/en/library/innodb-recovery-modes/ for information about forcing recovery.
+2026-02-09 17:55:04 0 [ERROR] InnoDB: Page [page id: space=0, page number=397] log sequence number 650696534 is in the future! Current system log sequence number 645873694.
+2026-02-09 17:55:04 0 [ERROR] InnoDB: Your database may be corrupt or you may have copied the InnoDB tablespace but not the InnoDB log files. Please refer to https://mariadb.com/kb/en/library/innodb-recovery-modes/ for information about forcing recovery.
+2026-02-09 17:55:04 0 [Note] InnoDB: 128 out of 128 rollback segments are active.
+2026-02-09 17:55:04 0 [Note] InnoDB: Creating shared tablespace for temporary tables
+2026-02-09 17:55:04 0 [Note] InnoDB: Setting file 'C:\xampp\mysql\data\ibtmp1' size to 12 MB. Physically writing the file full; Please wait ...
+2026-02-09 17:55:04 0 [Note] InnoDB: File 'C:\xampp\mysql\data\ibtmp1' size is now 12 MB.
+2026-02-09 17:55:04 0 [Note] InnoDB: Waiting for purge to start
+2026-02-09 17:55:04 0 [Note] InnoDB: 10.4.32 started; log sequence number 645873685; transaction id 62776
+2026-02-09 17:55:04 0 [Note] InnoDB: Loading buffer pool(s) from C:\xampp\mysql\data\ib_buffer_pool
+2026-02-09 17:55:04 0 [Note] Plugin 'FEEDBACK' is disabled.
+2026-02-09 17:55:04 0 [Note] InnoDB: Buffer pool(s) load completed at 260209 17:55:04
+2026-02-09 17:55:04 0 [Note] Server socket created on IP: '::'.

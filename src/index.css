@@ -102,3 +102,212 @@ All colors MUST be HSL.
     @apply bg-background text-foreground;
   }
 }
+
+/* Photo Masking Module Styles */
+.vdp-modal {
+  position: fixed;
+  inset: 0;
+  z-index: 1000;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.vdp-modal.hidden {
+  display: none;
+}
+
+.vdp-modal-overlay {
+  position: absolute;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.5);
+  backdrop-filter: blur(4px);
+}
+
+.vdp-modal-content {
+  position: relative;
+  background: hsl(var(--card));
+  border: 1px solid hsl(var(--border));
+  border-radius: var(--radius);
+  box-shadow: 0 20px 25px -5px rgba(0, 0, 0, 0.1), 0 10px 10px -5px rgba(0, 0, 0, 0.04);
+  max-width: 90vw;
+  max-height: 90vh;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.vdp-modal-header {
+  padding: 1rem 1.5rem;
+  border-bottom: 1px solid hsl(var(--border));
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.vdp-modal-header h3 {
+  font-weight: 600;
+  font-size: 1.125rem;
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.vdp-modal-body {
+  padding: 1.5rem;
+  overflow-y: auto;
+  flex: 1;
+}
+
+.vdp-modal-footer {
+  padding: 1rem 1.5rem;
+  border-top: 1px solid hsl(var(--border));
+  display: flex;
+  justify-content: flex-end;
+  gap: 0.75rem;
+  background: hsl(var(--muted)/0.3);
+}
+
+.mask-section {
+  margin-bottom: 1.5rem;
+}
+
+.mask-section h4 {
+  font-size: 0.875rem;
+  font-weight: 600;
+  margin-bottom: 0.75rem;
+  color: hsl(var(--muted-foreground));
+}
+
+.upload-zone {
+  border: 2px dashed hsl(var(--border));
+  border-radius: var(--radius);
+  padding: 2rem;
+  text-align: center;
+  cursor: pointer;
+  transition: all 0.2s;
+}
+
+.upload-zone:hover,
+.upload-zone.dragover {
+  border-color: hsl(var(--primary));
+  background: hsl(var(--primary)/0.05);
+}
+
+.upload-placeholder i {
+  font-size: 2rem;
+  color: hsl(var(--muted-foreground));
+  margin-bottom: 0.5rem;
+}
+
+.photo-editor {
+  display: flex;
+  gap: 1.5rem;
+  align-items: center;
+}
+
+.photo-thumb {
+  width: 120px;
+  height: 120px;
+  object-fit: cover;
+  border-radius: var(--radius);
+  border: 1px solid hsl(var(--border));
+}
+
+.photo-controls {
+  flex: 1;
+}
+
+.control-row {
+  margin-bottom: 1rem;
+}
+
+.control-row label {
+  display: flex;
+  justify-content: space-between;
+  font-size: 0.75rem;
+  margin-bottom: 0.5rem;
+}
+
+.position-grid {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 4px;
+  width: 100px;
+}
+
+.position-grid button {
+  aspect-ratio: 1;
+  font-size: 10px;
+  border: 1px solid hsl(var(--border));
+  border-radius: 4px;
+  background: white;
+  color: #666;
+}
+
+.position-grid button:hover {
+  border-color: hsl(var(--primary));
+  color: hsl(var(--primary));
+}
+
+.shape-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(60px, 1fr));
+  gap: 0.5rem;
+}
+
+.shape-btn {
+  aspect-ratio: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid hsl(var(--border));
+  border-radius: var(--radius);
+  background: hsl(var(--background));
+  cursor: pointer;
+  transition: all 0.2s;
+}
+
+.shape-btn:hover {
+  border-color: hsl(var(--primary));
+}
+
+.shape-btn.active {
+  border-color: hsl(var(--primary));
+  background: hsl(var(--primary)/0.1);
+  color: hsl(var(--primary));
+}
+
+.style-controls {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 1rem;
+}
+
+.preview-container {
+  display: flex;
+  justify-content: center;
+  padding: 1rem;
+  background: radial-gradient(circle, #f0f0f0 10%, transparent 10%), radial-gradient(circle, #f0f0f0 10%, transparent 10%);
+  background-size: 20px 20px;
+  background-position: 0 0, 10px 10px;
+  border: 1px solid hsl(var(--border));
+  border-radius: var(--radius);
+}
+
+#mask-preview {
+  max-width: 100%;
+  box-shadow: 0 10px 15px -3px rgba(0, 0, 0, 0.1);
+}
+
+.btn-primary {
+  @apply bg-primary text-primary-foreground h-9 px-4 rounded-md font-medium transition-colors hover:bg-primary/90 disabled:opacity-50 disabled:cursor-not-allowed;
+}
+
+.btn-secondary {
+  @apply bg-secondary text-secondary-foreground h-9 px-4 rounded-md font-medium transition-colors hover:bg-secondary/80;
+}
+
+.close-btn {
+  @apply h-8 w-8 flex items-center justify-center rounded-md hover:bg-muted transition-colors;
+}

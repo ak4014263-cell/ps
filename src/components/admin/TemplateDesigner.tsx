@@ -38,7 +38,7 @@ const VARIABLE_FIELDS = [
 ];
 
 const DEFAULT_FONTS = [
-  'Arial', 'Helvetica', 'Times New Roman', 'Georgia', 'Verdana', 
+  'Arial', 'Helvetica', 'Times New Roman', 'Georgia', 'Verdana',
   'Courier New', 'Impact', 'Trebuchet MS', 'Tahoma'
 ];
 
@@ -66,7 +66,7 @@ export function TemplateDesigner({ onSave, editTemplate }: TemplateDesignerProps
   const [hasBackSide, setHasBackSide] = useState(false);
   const [selectedObject, setSelectedObject] = useState<any>(null);
   const [zoom, setZoom] = useState(1);
-  
+
   const [templateName, setTemplateName] = useState('');
   const [category, setCategory] = useState('ID Card');
   const [widthMm, setWidthMm] = useState(85.6);
@@ -93,12 +93,8 @@ export function TemplateDesigner({ onSave, editTemplate }: TemplateDesignerProps
   const { data: products = [] } = useQuery({
     queryKey: ['products-for-template'],
     queryFn: async () => {
-      const { data, error } = await supabase
-        .from('products')
-        .select('id, name, category, default_width_mm, default_height_mm')
-        .eq('active', true);
-      if (error) throw error;
-      return data;
+      const data = await apiService.productsAPI.getAll();
+      return Array.isArray(data) ? data.filter((p: any) => p.is_active !== false) : [];
     },
   });
 
@@ -106,13 +102,10 @@ export function TemplateDesigner({ onSave, editTemplate }: TemplateDesignerProps
   const { data: projects = [] } = useQuery({
     queryKey: ['projects-for-preview'],
     queryFn: async () => {
-      const { data, error } = await supabase
-        .from('projects')
-        .select('id, name')
-        .order('created_at', { ascending: false })
-        .limit(50);
-      if (error) throw error;
-      return data;
+      const data = await apiService.projectsAPI.getAll();
+      return Array.isArray(data) ? data.sort((a: any, b: any) =>
+        new Date(b.created_at).getTime() - new Date(a.created_at).getTime()
+      ).slice(0, 50) : [];
     },
   });
 
@@ -121,13 +114,10 @@ export function TemplateDesigner({ onSave, editTemplate }: TemplateDesignerProps
     queryKey: ['preview-records', previewProjectId],
     queryFn: async () => {
       if (!previewProjectId) return [];
-      const { data, error } = await supabase
-        .from('data_records')
-        .select('*')
-        .eq('project_id', previewProjectId)
-        .limit(50);
-      if (error) throw error;
-      return data;
+      const result = await apiService.dataRecordsAPI.getByProject(previewProjectId, { limit: 50 });
+      // API typically returns array or { data: [] } structure depending on implementation
+      // Based on api.ts getByProject returns response.json()
+      return Array.isArray(result) ? result : (result.data || []);
     },
     enabled: !!previewProjectId,
   });
@@ -153,17 +143,17 @@ export function TemplateDesigner({ onSave, editTemplate }: TemplateDesignerProps
     // Add center alignment guides
     const centerX = canvas.width! / 2;
     const centerY = canvas.height! / 2;
-    
+
     // Vertical center line
-    const vLine = new Line([centerX, 0], [centerX, canvas.height!], {
+    const vLine = new Line([centerX, 0, centerX, canvas.height!], {
       stroke: '#e0e0e0',
       strokeWidth: 1,
       selectable: false,
       evented: false,
     });
-    
+
     // Horizontal center line
-    const hLine = new Line([0, centerY], [canvas.width!, centerY], {
+    const hLine = new Line([0, centerY, canvas.width!, centerY], {
       stroke: '#e0e0e0',
       strokeWidth: 1,
       selectable: false,
@@ -171,7 +161,8 @@ export function TemplateDesigner({ onSave, editTemplate }: TemplateDesignerProps
     });
 
     canvas.add(vLine, hLine);
-    canvas.sendObjectsToBack([vLine, hLine]);
+    canvas.sendObjectToBack(vLine);
+    canvas.sendObjectToBack(hLine);
     canvas.renderAll();
 
     setFabricCanvas(canvas);
@@ -211,17 +202,17 @@ export function TemplateDesigner({ onSave, editTemplate }: TemplateDesignerProps
     // Add center alignment guides
     const centerX = canvas.width! / 2;
     const centerY = canvas.height! / 2;
-    
+
     // Vertical center line
-    const vLine = new Line([centerX, 0], [centerX, canvas.height!], {
+    const vLine = new Line([centerX, 0, centerX, canvas.height!], {
       stroke: '#e0e0e0',
       strokeWidth: 1,
       selectable: false,
       evented: false,
     });
-    
+
     // Horizontal center line
-    const hLine = new Line([0, centerY], [canvas.width!, centerY], {
+    const hLine = new Line([0, centerY, canvas.width!, centerY], {
       stroke: '#e0e0e0',
       strokeWidth: 1,
       selectable: false,
@@ -229,7 +220,8 @@ export function TemplateDesigner({ onSave, editTemplate }: TemplateDesignerProps
     });
 
     canvas.add(vLine, hLine);
-    canvas.sendObjectsToBack([vLine, hLine]);
+    canvas.sendObjectToBack(vLine);
+    canvas.sendObjectToBack(hLine);
     canvas.renderAll();
 
     setBackFabricCanvas(canvas);
@@ -260,7 +252,7 @@ export function TemplateDesigner({ onSave, editTemplate }: TemplateDesignerProps
 
   const addText = useCallback((text: string, isVariable = false) => {
     if (!activeCanvas) return;
-    
+
     const textbox = new Textbox(text, {
       left: 50,
       top: 50,
@@ -273,7 +265,7 @@ export function TemplateDesigner({ onSave, editTemplate }: TemplateDesignerProps
       editable: true,
       data: isVariable ? { type: 'variable', field: text.replace(/[{}]/g, '') } : undefined,
     });
-    
+
     activeCanvas.add(textbox);
     activeCanvas.setActiveObject(textbox);
     activeCanvas.renderAll();
@@ -439,7 +431,7 @@ export function TemplateDesigner({ onSave, editTemplate }: TemplateDesignerProps
   // Update selected object properties
   useEffect(() => {
     if (!selectedObject || selectedObject.type !== 'textbox') return;
-    
+
     selectedObject.set({
       fontSize,
       fontFamily,
@@ -454,7 +446,7 @@ export function TemplateDesigner({ onSave, editTemplate }: TemplateDesignerProps
   // Load selected object properties
   useEffect(() => {
     if (!selectedObject || selectedObject.type !== 'textbox') return;
-    
+
     setFontSize(selectedObject.fontSize || 16);
     setFontFamily(selectedObject.fontFamily || 'Arial');
     setFontColor(selectedObject.fill?.toString() || '#000000');
@@ -470,7 +462,7 @@ export function TemplateDesigner({ onSave, editTemplate }: TemplateDesignerProps
       }
 
       const designJson = JSON.stringify(fabricCanvas.toObject());
-      const backDesignJson = hasBackSide && backFabricCanvas 
+      const backDesignJson = hasBackSide && backFabricCanvas
         ? JSON.stringify(backFabricCanvas.toObject())
         : null;
 
@@ -551,9 +543,9 @@ export function TemplateDesigner({ onSave, editTemplate }: TemplateDesignerProps
             <Label className="text-xs text-muted-foreground">Variable Fields</Label>
             <div className="flex flex-wrap gap-1">
               {VARIABLE_FIELDS.slice(0, 4).map((field) => (
-                <Badge 
+                <Badge
                   key={field.id}
-                  variant="outline" 
+                  variant="outline"
                   className="cursor-pointer hover:bg-primary/10 text-xs"
                   onClick={() => addText(field.placeholder, true)}
                 >
@@ -591,9 +583,9 @@ export function TemplateDesigner({ onSave, editTemplate }: TemplateDesignerProps
               </Button>
             </div>
             <div>
-              <Input 
-                type="file" 
-                accept="image/*" 
+              <Input
+                type="file"
+                accept="image/*"
                 onChange={handleImageUpload}
                 className="text-xs h-8"
               />
@@ -637,7 +629,7 @@ export function TemplateDesigner({ onSave, editTemplate }: TemplateDesignerProps
             </Tabs>
           )}
           <Badge variant="outline">{Math.round(zoom * 100)}%</Badge>
-          
+
           {/* Preview Mode Button */}
           <Dialog open={showPreview} onOpenChange={setShowPreview}>
             <DialogTrigger asChild>
@@ -812,7 +804,7 @@ export function TemplateDesigner({ onSave, editTemplate }: TemplateDesignerProps
           {selectedObject?.type === 'textbox' && (
             <div className="space-y-3 pt-3 border-t">
               <Label className="text-xs text-muted-foreground">Text Properties</Label>
-              
+
               <div className="space-y-1">
                 <Label className="text-xs">Font</Label>
                 <Select value={fontFamily} onValueChange={setFontFamily}>

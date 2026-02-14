@@ -1,0 +1,7 @@
+﻿71: interface AdvancedTemplateDesignerProps {
+102: * @param {Object} props - Component props
+103: * @param {any} [props.editTemplate] - Template data to load for editing
+104: * @param {() => void} [props.onBack] - Callback when user clicks back
+105: * @param {string} [props.projectId] - Project context for auto-populating client data
+106: * @param {ProjectClient} [props.projectClient] - Client data to auto-populate
+108: export function AdvancedTemplateDesigner({ editTemplate, onBack, projectId, projectClient }: AdvancedTemplateDesignerProps) {

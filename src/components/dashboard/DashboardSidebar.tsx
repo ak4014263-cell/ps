@@ -8,15 +8,15 @@ import {
   SidebarMenuButton,
   SidebarFooter,
 } from '@/components/ui/sidebar';
-import { 
+import {
   Home,
-  Package, 
+  Package,
   CheckSquare,
   Printer,
   ArrowLeftRight,
   AlertCircle,
-  Users, 
-  FolderKanban, 
+  Users,
+  FolderKanban,
   UserCog,
   BarChart3,
   TrendingUp,
@@ -37,18 +37,18 @@ export function DashboardSidebar() {
   const navigate = useNavigate();
   const { user } = useAuth();
   const { isSuperAdmin, isVendor, hasRole } = useUserRole();
-  
+
   // Persist activeMode in localStorage
   const [activeMode, setActiveMode] = useState<'vendor' | 'self'>(() => {
     const saved = localStorage.getItem('sidebar-active-mode');
     return (saved === 'self' || saved === 'vendor') ? saved : 'vendor';
   });
-  
+
   // Save to localStorage when mode changes
   useEffect(() => {
     localStorage.setItem('sidebar-active-mode', activeMode);
   }, [activeMode]);
-  
+
   const isVendorStaff = hasRole('vendor_staff');
 
   // Fetch user profile
@@ -56,13 +56,8 @@ export function DashboardSidebar() {
     queryKey: ['profile', user?.id],
     queryFn: async () => {
       if (!user?.id) return null;
-      const { data, error } = await supabase
-        .from('profiles')
-        .select('*')
-        .eq('id', user.id)
-        .maybeSingle();
-      if (error) throw error;
-      return data;
+      const response = await apiService.profilesAPI.getById(user.id);
+      return response.data || response || null;
     },
     enabled: !!user?.id,
   });
@@ -72,13 +67,14 @@ export function DashboardSidebar() {
     queryKey: ['vendor', user?.id],
     queryFn: async () => {
       if (!user?.id) return null;
-      const { data, error } = await supabase
-        .from('vendors')
-        .select('*')
-        .eq('user_id', user.id)
-        .maybeSingle();
-      if (error) throw error;
-      return data;
+      try {
+        const response = await apiService.vendorsAPI.getByUserId(user.id);
+        return response.data || response || null;
+      } catch (error) {
+        // Vendor not found is acceptable - user might not be a vendor
+        console.log('No vendor found for user:', user.id);
+        return null;
+      }
     },
     enabled: !!user?.id && isVendor,
   });

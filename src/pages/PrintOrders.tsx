@@ -34,58 +34,41 @@ const statusOptions = [
   'DISPATCHED',
 ];
 
+import { projectsAPI, clientsAPI } from '@/lib/api';
+
 export default function PrintOrders() {
   const [keyword, setKeyword] = useState('');
   const [typeFilter, setTypeFilter] = useState('All');
   const [clientFilter, setClientFilter] = useState('');
   const [statusFilter, setStatusFilter] = useState('All');
 
-  const { data: projects = [], isLoading } = useQuery({
-    queryKey: ['print-orders'],
+  const { data: projectsData, isLoading } = useQuery({
+    queryKey: ['print-orders', keyword, clientFilter, statusFilter],
     queryFn: async () => {
-      const { data, error } = await supabase
-        .from('projects')
-        .select(`
-          *,
-          client:clients(name, institution_name),
-          product:products(name, category)
-        `)
-        .order('created_at', { ascending: false });
-
-      if (error) throw error;
-      return data;
+      const response = await projectsAPI.getAll({
+        keyword,
+        client_id: clientFilter,
+        status: statusFilter === 'All' ? undefined : statusFilter
+      });
+      return response.data || [];
     },
   });
 
-  const { data: clients = [] } = useQuery({
+  const projects = projectsData || [];
+
+  const { data: clientsData } = useQuery({
     queryKey: ['clients-list'],
     queryFn: async () => {
-      const { data, error } = await supabase
-        .from('clients')
-        .select('id, name, institution_name')
-        .order('name');
-
-      if (error) throw error;
-      return data;
+      const response = await clientsAPI.getAll();
+      return response.data || [];
     },
   });
 
-  const filteredProjects = projects.filter((project) => {
-    const matchesKeyword = 
-      keyword === '' ||
-      project.name.toLowerCase().includes(keyword.toLowerCase()) ||
-      project.project_number.toLowerCase().includes(keyword.toLowerCase());
-    
-    const matchesClient =
-      clientFilter === '' ||
-      project.client_id === clientFilter;
-    
-    const matchesStatus =
-      statusFilter === 'All' ||
-      project.status === statusFilter.toLowerCase().replace(/_/g, '_');
+  const clients = clientsData || [];
 
-    return matchesKeyword && matchesClient && matchesStatus;
-  });
+  // Frontend filtering is now mostly handled by the backend, 
+  // but we keep the variable for consistency with the rest of the component
+  const filteredProjects = projects;
 
   const handleReset = () => {
     setKeyword('');
@@ -192,7 +175,7 @@ export default function PrintOrders() {
               filteredProjects.map((project, index) => (
                 <TableRow key={project.id}>
                   <TableCell>{index + 1}</TableCell>
-                  <TableCell className="font-medium">{project.name}</TableCell>
+                  <TableCell className="font-medium">{project.project_name || project.name}</TableCell>
                   <TableCell>
                     {project.client?.institution_name || project.client?.name || '-'}
                   </TableCell>

@@ -20,60 +20,7 @@ export function RecentActivityFeed() {
   const { data: activities = [], isLoading } = useQuery({
     queryKey: ['recent-activity'],
     queryFn: async () => {
-      const [projectsRes, paymentsRes, complaintsRes] = await Promise.all([
-        supabase
-          .from('projects')
-          .select('id, name, project_number, status, created_at, client:clients(name, institution_name), vendor:vendors(business_name)')
-          .order('created_at', { ascending: false })
-          .limit(5),
-        supabase
-          .from('payments')
-          .select('id, amount, payment_method, created_at, client:clients(name, institution_name), vendor:vendors(business_name)')
-          .order('created_at', { ascending: false })
-          .limit(5),
-        supabase
-          .from('complaints')
-          .select('id, title, status, priority, created_at, client:clients(name, institution_name), vendor:vendors(business_name)')
-          .order('created_at', { ascending: false })
-          .limit(5),
-      ]);
-
-      const items: ActivityItem[] = [];
-
-      (projectsRes.data || []).forEach((p) => {
-        items.push({
-          id: p.id,
-          type: 'project',
-          title: `${p.project_number} - ${p.name}`,
-          subtitle: `${p.vendor?.business_name} → ${p.client?.institution_name || p.client?.name}`,
-          status: p.status || undefined,
-          created_at: p.created_at,
-        });
-      });
-
-      (paymentsRes.data || []).forEach((p) => {
-        items.push({
-          id: p.id,
-          type: 'payment',
-          title: `₹${Number(p.amount).toLocaleString()} via ${p.payment_method}`,
-          subtitle: `${p.vendor?.business_name} from ${p.client?.institution_name || p.client?.name}`,
-          amount: Number(p.amount),
-          created_at: p.created_at,
-        });
-      });
-
-      (complaintsRes.data || []).forEach((c) => {
-        items.push({
-          id: c.id,
-          type: 'complaint',
-          title: c.title,
-          subtitle: `${c.vendor?.business_name} - ${c.client?.institution_name || c.client?.name}`,
-          status: c.status || undefined,
-          created_at: c.created_at,
-        });
-      });
-
-      return items.sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime()).slice(0, 10);
+      return await apiService.reportsAPI.getRecentActivity();
     },
   });
 

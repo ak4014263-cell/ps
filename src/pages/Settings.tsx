@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { apiClient } from '@/lib/apiClient';
+import { apiService } from '@/lib/api';
 import { useAuth } from '@/hooks/useAuth';
 import { useForm } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
@@ -19,6 +19,7 @@ import {
 } from '@/components/ui/form';
 import { useToast } from '@/hooks/use-toast';
 import { Loader2, User, Building2 } from 'lucide-react';
+import apiClient from '@/lib/apiClient';
 
 const profileSchema = z.object({
   fullName: z.string().trim().min(2, 'Name must be at least 2 characters').max(100),
@@ -57,14 +58,14 @@ export default function Settings() {
     queryKey: ['vendor', user?.id],
     queryFn: async () => {
       if (!user?.id) return null;
-      const { data, error } = await supabase
-        .from('vendors')
-        .select('*')
-        .eq('user_id', user.id)
-        .maybeSingle();
-
-      if (error) throw error;
-      return data;
+      // Get profile first to get vendor_id
+      const profileResponse = await apiService.profilesAPI.getById(user.id);
+      const profileData = profileResponse.data || profileResponse;
+      if (profileData?.vendor_id) {
+        const vendorResponse = await apiService.vendorsAPI.getById(profileData.vendor_id);
+        return vendorResponse.data || vendorResponse;
+      }
+      return null;
     },
     enabled: !!user?.id,
   });
@@ -94,15 +95,10 @@ export default function Settings() {
     mutationFn: async (values: ProfileFormValues) => {
       if (!user?.id) throw new Error('Not authenticated');
 
-      const { error } = await supabase
-        .from('profiles')
-        .update({
-          full_name: values.fullName,
-          phone: values.phone || null,
-        })
-        .eq('id', user.id);
-
-      if (error) throw error;
+      await apiService.profilesAPI.update(user.id, {
+        full_name: values.fullName,
+        phone: values.phone || null,
+      });
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['profile', user?.id] });
@@ -124,19 +120,14 @@ export default function Settings() {
     mutationFn: async (values: BusinessFormValues) => {
       if (!user?.id || !vendor?.id) throw new Error('Not authenticated or not a vendor');
 
-      const { error } = await supabase
-        .from('vendors')
-        .update({
-          business_name: values.businessName,
-          gstin: values.gstin || null,
-          address: values.address || null,
-          city: values.city || null,
-          state: values.state || null,
-          pincode: values.pincode || null,
-        })
-        .eq('id', vendor.id);
-
-      if (error) throw error;
+      await apiService.vendorsAPI.update(vendor.id, {
+        business_name: values.businessName,
+        gstin: values.gstin || null,
+        address: values.address || null,
+        city: values.city || null,
+        state: values.state || null,
+        pincode: values.pincode || null,
+      });
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['vendor', user?.id] });
@@ -205,9 +196,9 @@ export default function Settings() {
                       <FormItem>
                         <FormLabel>Email *</FormLabel>
                         <FormControl>
-                          <Input 
-                            placeholder="john@example.com" 
-                            {...field} 
+                          <Input
+                            placeholder="john@example.com"
+                            {...field}
                             disabled
                             className="bg-muted"
                           />
@@ -234,8 +225,8 @@ export default function Settings() {
                     )}
                   />
 
-                  <Button 
-                    type="submit" 
+                  <Button
+                    type="submit"
                     disabled={updateProfileMutation.isPending}
                   >
                     {updateProfileMutation.isPending && (
@@ -347,8 +338,8 @@ export default function Settings() {
                       />
                     </div>
 
-                    <Button 
-                      type="submit" 
+                    <Button
+                      type="submit"
                       disabled={updateBusinessMutation.isPending}
                     >
                       {updateBusinessMutation.isPending && (

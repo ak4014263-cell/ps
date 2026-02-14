@@ -6,78 +6,21 @@ import { Badge } from '@/components/ui/badge';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Separator } from '@/components/ui/separator';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
-import { TextboxInputDialog } from './TextboxInputDialog';
 import {
   Type, Square, Circle, Triangle, Star, Minus, Image, QrCode, Barcode,
-  User, Phone, Mail, Calendar, MapPin, CreditCard,
-  Hash, Droplet, GraduationCap, Users, ArrowRight, Hexagon, Pentagon, X, Heart, Octagon,
-  Building2, FileSignature, Briefcase
+  ArrowRight, Hexagon, Pentagon, X, User, Sparkles
 } from 'lucide-react';
 
 export type PhotoShape = 'rect' | 'rounded-rect' | 'circle' | 'ellipse' | 'hexagon' | 'star' | 'heart' | 'octagon' | 'pentagon';
 
 interface DesignerElementsPanelProps {
   onAddShape: (type: string) => void;
-  onAddText: (text: string, isVariable?: boolean, asBox?: boolean) => void;
+  onAddText: (text: string, isVariable?: boolean, asBox?: boolean, isVDP?: boolean) => void;
   onAddImage: (file: File) => void;
   onAddPlaceholder: (type: 'photo' | 'barcode' | 'qrcode', shape?: PhotoShape) => void;
   onClose?: () => void;
   canvasRef?: React.RefObject<HTMLCanvasElement>;
 }
-
-// Company/Client fields
-const COMPANY_FIELDS = [
-  { id: 'institution_name', label: 'Institution Name', icon: Building2, placeholder: '{{institution_name}}' },
-  { id: 'client_name', label: 'Contact Person', icon: User, placeholder: '{{client_name}}' },
-  { id: 'client_phone', label: 'Contact Phone', icon: Phone, placeholder: '{{client_phone}}' },
-  { id: 'client_email', label: 'Contact Email', icon: Mail, placeholder: '{{client_email}}' },
-  { id: 'client_designation', label: 'Designation', icon: Briefcase, placeholder: '{{client_designation}}' },
-  { id: 'client_address', label: 'Address', icon: MapPin, placeholder: '{{client_address}}' },
-  { id: 'client_city', label: 'City', icon: MapPin, placeholder: '{{client_city}}' },
-  { id: 'client_state', label: 'State', icon: MapPin, placeholder: '{{client_state}}' },
-  { id: 'client_pincode', label: 'Pincode', icon: Hash, placeholder: '{{client_pincode}}' },
-  { id: 'company_logo', label: 'Company Logo', icon: Image, placeholder: '{{company_logo}}', isPlaceholder: true, isPhoto: true },
-  { id: 'company_signature', label: 'Signature', icon: FileSignature, placeholder: '{{company_signature}}', isPlaceholder: true, isPhoto: true },
-];
-
-const VARIABLE_FIELDS = [
-  // Student Info
-  { id: 'firstName', label: 'First Name', icon: User, placeholder: '{{firstName}}' },
-  { id: 'lastName', label: 'Last Name', icon: User, placeholder: '{{lastName}}' },
-  { id: 'name', label: 'Full Name', icon: User, placeholder: '{{name}}' },
-  { id: 'photo', label: 'Photo', icon: Image, placeholder: '{{photo}}', isPlaceholder: true, isPhoto: true },
-  { id: 'profilePic', label: 'Profile Pic', icon: Image, placeholder: '{{profilePic}}', isPlaceholder: true, isPhoto: true },
-  
-  // Academic Info
-  { id: 'className', label: 'Class', icon: GraduationCap, placeholder: '{{className}}' },
-  { id: 'sec', label: 'Section', icon: GraduationCap, placeholder: '{{sec}}' },
-  { id: 'admNo', label: 'Admission No', icon: Hash, placeholder: '{{admNo}}' },
-  { id: 'roll_no', label: 'Roll No', icon: Hash, placeholder: '{{roll_no}}' },
-  { id: 'schoolCode', label: 'School Code', icon: CreditCard, placeholder: '{{schoolCode}}' },
-  { id: 'session', label: 'Session', icon: Calendar, placeholder: '{{session}}' },
-  
-  // Personal Info
-  { id: 'dob', label: 'Date of Birth', icon: Calendar, placeholder: '{{dob}}' },
-  { id: 'blood_group', label: 'Blood Group', icon: Droplet, placeholder: '{{blood_group}}' },
-  { id: 'gender', label: 'Gender', icon: User, placeholder: '{{gender}}' },
-  { id: 'address', label: 'Address', icon: MapPin, placeholder: '{{address}}' },
-  
-  // Parent Info
-  { id: 'fatherName', label: 'Father Name', icon: Users, placeholder: '{{fatherName}}' },
-  { id: 'motherName', label: 'Mother Name', icon: Users, placeholder: '{{motherName}}' },
-  { id: 'fatherMobNo', label: 'Father Mobile', icon: Phone, placeholder: '{{fatherMobNo}}' },
-  { id: 'motherMobNo', label: 'Mother Mobile', icon: Phone, placeholder: '{{motherMobNo}}' },
-  
-  // Contact
-  { id: 'phone', label: 'Phone', icon: Phone, placeholder: '{{phone}}' },
-  { id: 'email', label: 'Email', icon: Mail, placeholder: '{{email}}' },
-  
-  // Codes
-  { id: 'id_number', label: 'ID Number', icon: CreditCard, placeholder: '{{id_number}}' },
-  { id: 'rfid', label: 'RFID', icon: CreditCard, placeholder: '{{rfid}}' },
-  { id: 'barcode', label: 'Barcode', icon: Barcode, placeholder: '{{barcode}}', isPlaceholder: true },
-  { id: 'qr_code', label: 'QR Code', icon: QrCode, placeholder: '{{qr_code}}', isPlaceholder: true },
-];
 
 const SHAPES = [
   { type: 'rect', icon: Square, label: 'Rectangle' },
@@ -87,18 +30,6 @@ const SHAPES = [
   { type: 'polygon', icon: Hexagon, label: 'Hexagon' },
   { type: 'line', icon: Minus, label: 'Line' },
   { type: 'arrow', icon: ArrowRight, label: 'Arrow' },
-];
-
-const PHOTO_SHAPES: { id: PhotoShape; name: string; icon: React.ReactNode }[] = [
-  { id: 'rect', name: 'Rectangle', icon: <Square className="h-4 w-4" /> },
-  { id: 'rounded-rect', name: 'Rounded', icon: <div className="h-4 w-4 border-2 border-current rounded-md" /> },
-  { id: 'circle', name: 'Circle', icon: <Circle className="h-4 w-4" /> },
-  { id: 'ellipse', name: 'Ellipse', icon: <div className="h-3 w-5 border-2 border-current rounded-full" /> },
-  { id: 'hexagon', name: 'Hexagon', icon: <Hexagon className="h-4 w-4" /> },
-  { id: 'star', name: 'Star', icon: <Star className="h-4 w-4" /> },
-  { id: 'heart', name: 'Heart', icon: <Heart className="h-4 w-4" /> },
-  { id: 'octagon', name: 'Octagon', icon: <Octagon className="h-4 w-4" /> },
-  { id: 'pentagon', name: 'Pentagon', icon: <Pentagon className="h-4 w-4" /> },
 ];
 
 export function DesignerElementsPanel({
@@ -111,7 +42,7 @@ export function DesignerElementsPanel({
 }: DesignerElementsPanelProps) {
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [photoPopoverOpen, setPhotoPopoverOpen] = useState<string | null>(null);
-  const [variableMode, setVariableMode] = useState<'text' | 'box'>('text');
+
   const [textboxDialogOpen, setTextboxDialogOpen] = useState(false);
 
   const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -132,29 +63,7 @@ export function DesignerElementsPanel({
     setTextboxDialogOpen(false);
   };
 
-  const handleVariableClick = (field: typeof VARIABLE_FIELDS[0]) => {
-    if (field.id === 'barcode') {
-      onAddPlaceholder('barcode');
-    } else if (field.id === 'qr_code') {
-      onAddPlaceholder('qrcode');
-    } else if (!field.isPhoto) {
-      // Use box mode if selected, otherwise text mode
-      onAddText(field.placeholder, true, variableMode === 'box');
-    }
-    // Photo variables are handled by the popover
-  };
 
-  // Handle drag start for variable fields
-  const handleDragStart = (e: React.DragEvent, field: typeof VARIABLE_FIELDS[0]) => {
-    e.dataTransfer.setData('application/json', JSON.stringify({
-      type: 'variable-field',
-      fieldId: field.id,
-      placeholder: field.placeholder,
-      isPhoto: field.isPhoto,
-      isPlaceholder: field.isPlaceholder,
-    }));
-    e.dataTransfer.effectAllowed = 'copy';
-  };
 
   return (
     <div className="w-72 bg-card border-r shadow-lg">
@@ -171,8 +80,8 @@ export function DesignerElementsPanel({
           <Tabs defaultValue="shapes" className="w-full">
             <TabsList className="w-full grid grid-cols-3">
               <TabsTrigger value="shapes" className="text-xs">Shapes</TabsTrigger>
-              <TabsTrigger value="text" className="text-xs">Text</TabsTrigger>
               <TabsTrigger value="media" className="text-xs">Media</TabsTrigger>
+              <TabsTrigger value="text" className="text-xs">Text</TabsTrigger>
             </TabsList>
 
             {/* Shapes Tab */}
@@ -236,194 +145,7 @@ export function DesignerElementsPanel({
               </div>
             </TabsContent>
 
-            {/* Text Tab */}
-            <TabsContent value="text" className="mt-3 space-y-3">
-              <div className="space-y-2">
-                <Button
-                  variant="outline"
-                  className="w-full justify-start h-10"
-                  onClick={() => onAddText('Heading', false)}
-                >
-                  <Type className="h-5 w-5 mr-2" />
-                  <span className="font-bold">Add Heading</span>
-                </Button>
-                <Button
-                  variant="outline"
-                  className="w-full justify-start h-10"
-                  onClick={() => onAddText('Subheading', false)}
-                >
-                  <Type className="h-4 w-4 mr-2" />
-                  <span className="font-medium text-sm">Add Subheading</span>
-                </Button>
-                <Button
-                  variant="outline"
-                  className="w-full justify-start h-10"
-                  onClick={() => onAddText('Body text', false)}
-                >
-                  <Type className="h-3 w-3 mr-2" />
-                  <span className="text-sm">Add Body Text</span>
-                </Button>
-                <Button
-                  variant="default"
-                  className="w-full justify-start h-10 bg-blue-600 hover:bg-blue-700"
-                  onClick={() => setTextboxDialogOpen(true)}
-                >
-                  <Type className="h-4 w-4 mr-2" />
-                  <span className="text-sm font-medium">Add Custom Text</span>
-                </Button>
-              </div>
 
-              <Separator />
-
-              <div className="space-y-2">
-                <Tabs defaultValue="variable" className="w-full">
-                  <TabsList className="w-full grid grid-cols-2">
-                    <TabsTrigger value="company" className="text-xs">Company</TabsTrigger>
-                    <TabsTrigger value="variable" className="text-xs">Variables</TabsTrigger>
-                  </TabsList>
-
-                  {/* Company Fields Tab */}
-                  <TabsContent value="company" className="mt-2 space-y-1">
-                    {COMPANY_FIELDS.map((field) => (
-                      field.isPhoto ? (
-                        <Popover 
-                          key={field.id} 
-                          open={photoPopoverOpen === field.id}
-                          onOpenChange={(open) => setPhotoPopoverOpen(open ? field.id : null)}
-                        >
-                          <PopoverTrigger asChild>
-                            <Button
-                              variant="ghost"
-                              className="w-full justify-start h-8 text-xs"
-                            >
-                              <field.icon className="h-3.5 w-3.5 mr-2" />
-                              {field.label}
-                              <Badge variant="secondary" className="ml-auto text-[10px] h-4">
-                                Image
-                              </Badge>
-                            </Button>
-                          </PopoverTrigger>
-                          <PopoverContent className="w-64 p-3" side="right" align="start">
-                            <div className="space-y-3">
-                              <p className="text-xs font-medium">Select Shape</p>
-                              <div className="grid grid-cols-3 gap-2">
-                                {PHOTO_SHAPES.map((shape) => (
-                                  <Button
-                                    key={shape.id}
-                                    variant="outline"
-                                    className="h-12 flex-col gap-1 p-1"
-                                    onClick={() => handleAddPhotoWithShape(shape.id)}
-                                  >
-                                    {shape.icon}
-                                    <span className="text-[9px]">{shape.name}</span>
-                                  </Button>
-                                ))}
-                              </div>
-                            </div>
-                          </PopoverContent>
-                        </Popover>
-                      ) : (
-                        <Button
-                          key={field.id}
-                          variant="ghost"
-                          className="w-full justify-start h-8 text-xs cursor-grab active:cursor-grabbing"
-                          onClick={() => handleVariableClick(field)}
-                          draggable
-                          onDragStart={(e) => handleDragStart(e, field)}
-                        >
-                          <field.icon className="h-3.5 w-3.5 mr-2" />
-                          {field.label}
-                        </Button>
-                      )
-                    ))}
-                  </TabsContent>
-
-                  {/* Variable Fields Tab */}
-                  <TabsContent value="variable" className="mt-2 space-y-1">
-                    {/* Mode selector for variable fields */}
-                    <div className="flex gap-1 mb-2 p-1 bg-muted rounded-md">
-                      <button
-                        onClick={() => setVariableMode('text')}
-                        className={`flex-1 text-xs py-1 px-2 rounded transition-colors ${
-                          variableMode === 'text'
-                            ? 'bg-background text-foreground shadow-sm'
-                            : 'text-muted-foreground hover:text-foreground'
-                        }`}
-                      >
-                        Text
-                      </button>
-                      <button
-                        onClick={() => setVariableMode('box')}
-                        className={`flex-1 text-xs py-1 px-2 rounded transition-colors ${
-                          variableMode === 'box'
-                            ? 'bg-background text-foreground shadow-sm'
-                            : 'text-muted-foreground hover:text-foreground'
-                        }`}
-                      >
-                        Box
-                      </button>
-                    </div>
-                    {VARIABLE_FIELDS.map((field) => (
-                      field.isPhoto ? (
-                        <Popover 
-                          key={field.id} 
-                          open={photoPopoverOpen === field.id}
-                          onOpenChange={(open) => setPhotoPopoverOpen(open ? field.id : null)}
-                        >
-                          <PopoverTrigger asChild>
-                            <Button
-                              variant="ghost"
-                              className="w-full justify-start h-8 text-xs"
-                            >
-                              <field.icon className="h-3.5 w-3.5 mr-2" />
-                              {field.label}
-                              <Badge variant="secondary" className="ml-auto text-[10px] h-4">
-                                Shape
-                              </Badge>
-                            </Button>
-                          </PopoverTrigger>
-                          <PopoverContent className="w-64 p-3" side="right" align="start">
-                            <div className="space-y-3">
-                              <p className="text-xs font-medium">Select Photo Shape</p>
-                              <div className="grid grid-cols-3 gap-2">
-                                {PHOTO_SHAPES.map((shape) => (
-                                  <Button
-                                    key={shape.id}
-                                    variant="outline"
-                                    className="h-12 flex-col gap-1 p-1"
-                                    onClick={() => handleAddPhotoWithShape(shape.id)}
-                                  >
-                                    {shape.icon}
-                                    <span className="text-[9px]">{shape.name}</span>
-                                  </Button>
-                                ))}
-                              </div>
-                            </div>
-                          </PopoverContent>
-                        </Popover>
-                      ) : (
-                        <Button
-                          key={field.id}
-                          variant="ghost"
-                          className="w-full justify-start h-8 text-xs cursor-grab active:cursor-grabbing"
-                          onClick={() => handleVariableClick(field)}
-                          draggable={!field.isPlaceholder}
-                          onDragStart={(e) => handleDragStart(e, field)}
-                        >
-                          <field.icon className="h-3.5 w-3.5 mr-2" />
-                          {field.label}
-                          {field.isPlaceholder && (
-                            <Badge variant="secondary" className="ml-auto text-[10px] h-4">
-                              Special
-                            </Badge>
-                          )}
-                        </Button>
-                      )
-                    ))}
-                  </TabsContent>
-                </Tabs>
-              </div>
-            </TabsContent>
 
             {/* Media Tab */}
             <TabsContent value="media" className="mt-3 space-y-3">
@@ -452,7 +174,7 @@ export function DesignerElementsPanel({
                 <Button
                   variant="outline"
                   className="w-full justify-start h-10"
-                  onClick={() => onAddPlaceholder('photo')}
+                  onClick={() => onAddPlaceholder('photo', 'rect')}
                 >
                   <User className="h-4 w-4 mr-2" />
                   Photo Placeholder
@@ -475,16 +197,68 @@ export function DesignerElementsPanel({
                 </Button>
               </div>
             </TabsContent>
+            {/* Text Tab */}
+            <TabsContent value="text" className="mt-3 space-y-3">
+              <div className="space-y-2">
+                <Button
+                  variant="outline"
+                  className="w-full h-12 justify-start px-4"
+                  onClick={() => onAddText('Heading', false, false)}
+                >
+                  <Type className="h-5 w-5 mr-3" />
+                  <div className="flex flex-col items-start">
+                    <span className="text-xs font-medium">Add Heading</span>
+                  </div>
+                </Button>
+                <Button
+                  variant="outline"
+                  className="w-full h-12 justify-start px-4"
+                  onClick={() => onAddText('Your text here', false, false)}
+                >
+                  <Type className="h-4 w-4 mr-3" />
+                  <div className="flex flex-col items-start">
+                    <span className="text-xs">Add Paragraph Text</span>
+                  </div>
+                </Button>
+
+                <Separator className="my-2" />
+
+                <div className="space-y-2">
+                  <Label className="text-[10px] text-muted-foreground uppercase font-bold px-1">Advanced Text Tools</Label>
+                  <Button
+                    variant="outline"
+                    className="w-full h-12 justify-start px-4 border-dashed bg-primary/5 hover:bg-primary/10 border-primary/20"
+                    onClick={() => (onAddText as any)('VDP Text', false, false, true)}
+                  >
+                    <Sparkles className="h-4 w-4 mr-3 text-primary" />
+                    <div className="flex flex-col items-start text-left">
+                      <span className="text-xs font-medium text-primary">VDP Text Tool</span>
+                      <span className="text-[9px] text-muted-foreground">Auto-sizing & wrapping container</span>
+                    </div>
+                  </Button>
+
+                  <Button
+                    variant="outline"
+                    className="w-full h-12 justify-start px-4 border-dashed"
+                    onClick={() => onAddText('{{variable}}', true, true)}
+                  >
+                    <div className="h-5 w-5 mr-3 flex items-center justify-center border border-dashed rounded text-[10px] font-mono">
+                      {`{}`}
+                    </div>
+                    <div className="flex flex-col items-start">
+                      <span className="text-xs font-medium">Add Variable Field</span>
+                      <span className="text-[10px] text-muted-foreground">Dynamic data placeholder</span>
+                    </div>
+                  </Button>
+                </div>
+              </div>
+            </TabsContent>
           </Tabs>
         </div>
       </ScrollArea>
 
       {/* Textbox Input Dialog */}
-      <TextboxInputDialog
-        open={textboxDialogOpen}
-        onOpenChange={setTextboxDialogOpen}
-        onConfirm={handleTextboxConfirm}
-      />
+
     </div>
   );
 }

@@ -63,7 +63,7 @@ export function DesignerLayersPanel({
     if (obj.data?.layerName) {
       return obj.data.layerName;
     }
-    
+
     const type = obj.type || 'object';
     if (obj.text) {
       const text = obj.text.substring(0, 15);
@@ -153,10 +153,7 @@ export function DesignerLayersPanel({
     if (dragIdx !== null && dragIdx !== dropIdx) {
       // Use the same sorting as in the render to identify neighbors correctly
       const filtered = objects.filter((obj: any) => !obj.data?.isGuideline);
-      const sorted = [...filtered].sort((a, b) => {
-        if ((a.top || 0) !== (b.top || 0)) return (a.top || 0) - (b.top || 0);
-        return (a.left || 0) - (b.left || 0);
-      });
+      const sorted = [...filtered].reverse();
 
       const draggedObj = sorted[dragIdx];
 
@@ -185,8 +182,8 @@ export function DesignerLayersPanel({
   // Filter out guideline objects and background objects (optional, or just keep them at bottom)
   const filteredObjects = objects.filter((obj: any) => !obj.data?.isGuideline);
 
-  // Sort by vertical position (top property)
-  const sortedObjects = [...filteredObjects].sort((a, b) => (a.top || 0) - (b.top || 0));
+  // Sort by z-index (reversed, so top layer is first in list)
+  const sortedObjects = [...filteredObjects].reverse();
 
   return (
     <TooltipProvider>

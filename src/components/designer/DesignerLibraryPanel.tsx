@@ -11,7 +11,7 @@ import { Separator } from '@/components/ui/separator';
 import { toast } from 'sonner';
 import { apiService } from '@/lib/api';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { 
+import {
   X, Upload, Trash2, Type, Globe, Lock,
   Loader2, Hexagon, Image as ImageIcon
 } from 'lucide-react';
@@ -49,14 +49,8 @@ export function DesignerLibraryPanel({
   const { data: libraryFonts = [], isLoading: loadingFonts } = useQuery({
     queryKey: ['library-fonts', vendorId],
     queryFn: async () => {
-      let query = supabase
-        .from('library_fonts')
-        .select('*')
-        .order('created_at', { ascending: false });
-      
-      const { data, error } = await query;
-      if (error) throw error;
-      return data || [];
+      if (!vendorId) return [];
+      return apiService.libraryAPI.getFonts(vendorId);
     },
     staleTime: 1000,
   });
@@ -65,14 +59,8 @@ export function DesignerLibraryPanel({
   const { data: libraryShapes = [], isLoading: loadingShapes } = useQuery({
     queryKey: ['library-shapes', vendorId],
     queryFn: async () => {
-      let query = supabase
-        .from('library_shapes')
-        .select('*')
-        .order('created_at', { ascending: false });
-      
-      const { data, error } = await query;
-      if (error) throw error;
-      return data || [];
+      if (!vendorId) return [];
+      return apiService.libraryAPI.getShapes(vendorId);
     },
     staleTime: 1000,
   });
@@ -81,14 +69,8 @@ export function DesignerLibraryPanel({
   const { data: libraryIcons = [], isLoading: loadingIcons } = useQuery({
     queryKey: ['library-icons', vendorId],
     queryFn: async () => {
-      let query = supabase
-        .from('library_icons')
-        .select('*')
-        .order('created_at', { ascending: false });
-      
-      const { data, error } = await query;
-      if (error) throw error;
-      return data || [];
+      if (!vendorId) return [];
+      return apiService.libraryAPI.getIcons(vendorId);
     },
     staleTime: 1000,
   });
@@ -97,30 +79,7 @@ export function DesignerLibraryPanel({
   const uploadFontMutation = useMutation({
     mutationFn: async ({ file, name, isPublic }: { file: File; name: string; isPublic: boolean }) => {
       if (!vendorId) throw new Error('No vendor ID');
-      
-      const fileName = `${vendorId}/${Date.now()}-${file.name}`;
-      const { error: uploadError } = await supabase.storage
-        .from('library-fonts')
-        .upload(fileName, file);
-      
-      if (uploadError) throw uploadError;
-      
-      const { data: { publicUrl } } = supabase.storage
-        .from('library-fonts')
-        .getPublicUrl(fileName);
-      
-      const { error: insertError } = await supabase
-        .from('library_fonts')
-        .insert({
-          vendor_id: vendorId,
-          name,
-          font_url: publicUrl,
-          is_public: isPublic,
-        });
-      
-      if (insertError) throw insertError;
-      
-      return { name, url: publicUrl };
+      return apiService.libraryAPI.uploadFont({ file, name, isPublic, vendorId });
     },
     onSuccess: (data) => {
       queryClient.invalidateQueries({ queryKey: ['library-fonts'] });
@@ -138,30 +97,7 @@ export function DesignerLibraryPanel({
   const uploadShapeMutation = useMutation({
     mutationFn: async ({ file, name, isPublic }: { file: File; name: string; isPublic: boolean }) => {
       if (!vendorId) throw new Error('No vendor ID');
-      
-      const fileName = `${vendorId}/${Date.now()}-${file.name}`;
-      const { error: uploadError } = await supabase.storage
-        .from('library-shapes')
-        .upload(fileName, file);
-      
-      if (uploadError) throw uploadError;
-      
-      const { data: { publicUrl } } = supabase.storage
-        .from('library-shapes')
-        .getPublicUrl(fileName);
-      
-      const { error: insertError } = await supabase
-        .from('library_shapes')
-        .insert({
-          vendor_id: vendorId,
-          name,
-          shape_url: publicUrl,
-          is_public: isPublic,
-        });
-      
-      if (insertError) throw insertError;
-      
-      return { name, url: publicUrl };
+      return apiService.libraryAPI.uploadShape({ file, name, isPublic, vendorId });
     },
     onSuccess: (data) => {
       queryClient.invalidateQueries({ queryKey: ['library-shapes'] });
@@ -179,30 +115,7 @@ export function DesignerLibraryPanel({
   const uploadIconMutation = useMutation({
     mutationFn: async ({ file, name, isPublic }: { file: File; name: string; isPublic: boolean }) => {
       if (!vendorId) throw new Error('No vendor ID');
-      
-      const fileName = `${vendorId}/${Date.now()}-${file.name}`;
-      const { error: uploadError } = await supabase.storage
-        .from('library-icons')
-        .upload(fileName, file);
-      
-      if (uploadError) throw uploadError;
-      
-      const { data: { publicUrl } } = supabase.storage
-        .from('library-icons')
-        .getPublicUrl(fileName);
-      
-      const { error: insertError } = await supabase
-        .from('library_icons')
-        .insert({
-          vendor_id: vendorId,
-          name,
-          icon_url: publicUrl,
-          is_public: isPublic,
-        });
-      
-      if (insertError) throw insertError;
-      
-      return { name, url: publicUrl };
+      return apiService.libraryAPI.uploadIcon({ file, name, isPublic, vendorId });
     },
     onSuccess: (data) => {
       queryClient.invalidateQueries({ queryKey: ['library-icons'] });
@@ -219,11 +132,7 @@ export function DesignerLibraryPanel({
   // Delete mutations
   const deleteFontMutation = useMutation({
     mutationFn: async (id: string) => {
-      const { error } = await supabase
-        .from('library_fonts')
-        .delete()
-        .eq('id', id);
-      if (error) throw error;
+      return apiService.libraryAPI.deleteFont(id);
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['library-fonts'] });
@@ -233,11 +142,7 @@ export function DesignerLibraryPanel({
 
   const deleteShapeMutation = useMutation({
     mutationFn: async (id: string) => {
-      const { error } = await supabase
-        .from('library_shapes')
-        .delete()
-        .eq('id', id);
-      if (error) throw error;
+      return apiService.libraryAPI.deleteShape(id);
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['library-shapes'] });
@@ -247,11 +152,7 @@ export function DesignerLibraryPanel({
 
   const deleteIconMutation = useMutation({
     mutationFn: async (id: string) => {
-      const { error } = await supabase
-        .from('library_icons')
-        .delete()
-        .eq('id', id);
-      if (error) throw error;
+      return apiService.libraryAPI.deleteIcon(id);
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['library-icons'] });
@@ -262,12 +163,12 @@ export function DesignerLibraryPanel({
   const handleFontUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
-    
+
     if (!newFontName.trim()) {
       toast.error('Please enter a font name');
       return;
     }
-    
+
     setUploadingFont(true);
     uploadFontMutation.mutate(
       { file, name: newFontName.trim(), isPublic: isPublicFont },
@@ -279,12 +180,12 @@ export function DesignerLibraryPanel({
   const handleShapeUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
-    
+
     if (!newShapeName.trim()) {
       toast.error('Please enter a shape name');
       return;
     }
-    
+
     setUploadingShape(true);
     uploadShapeMutation.mutate(
       { file, name: newShapeName.trim(), isPublic: isPublicShape },
@@ -296,12 +197,12 @@ export function DesignerLibraryPanel({
   const handleIconUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
-    
+
     if (!newIconName.trim()) {
       toast.error('Please enter an icon name');
       return;
     }
-    
+
     setUploadingIcon(true);
     uploadIconMutation.mutate(
       { file, name: newIconName.trim(), isPublic: isPublicIcon },
@@ -328,19 +229,19 @@ export function DesignerLibraryPanel({
       </div>
       <Tabs defaultValue="fonts" className="w-full">
         <TabsList className="w-full grid grid-cols-3">
-    <TabsTrigger value="fonts" className="text-xs flex items-center gap-1">
-      <Type className="h-3.5 w-3.5" />
-      <span>Fonts</span>
-    </TabsTrigger>
-    <TabsTrigger value="shapes" className="text-xs flex items-center gap-1">
-      <Hexagon className="h-3.5 w-3.5" />
-      <span>Shapes</span>
-    </TabsTrigger>
-    <TabsTrigger value="icons" className="text-xs flex items-center gap-1">
-      <ImageIcon className="h-3.5 w-3.5" />
-      <span>Icons</span>
-    </TabsTrigger>
-  </TabsList>
+          <TabsTrigger value="fonts" className="text-xs flex items-center gap-1">
+            <Type className="h-3.5 w-3.5" />
+            <span>Fonts</span>
+          </TabsTrigger>
+          <TabsTrigger value="shapes" className="text-xs flex items-center gap-1">
+            <Hexagon className="h-3.5 w-3.5" />
+            <span>Shapes</span>
+          </TabsTrigger>
+          <TabsTrigger value="icons" className="text-xs flex items-center gap-1">
+            <ImageIcon className="h-3.5 w-3.5" />
+            <span>Icons</span>
+          </TabsTrigger>
+        </TabsList>
 
         {/* Fonts Tab */}
         <TabsContent value="fonts" className="flex-1 flex flex-col m-0 min-h-0">

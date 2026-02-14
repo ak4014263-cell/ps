@@ -44,41 +44,49 @@ export function EnhancedAdminOverview() {
         return {
           vendors: { total: vendorsData.length, active: vendorsData.length },
           clients: { total: clientsData.length, active: clientsData.length },
-          projects: { total: projectsData.length },
+          projects: {
+            total: projectsData.length,
+            byStatus: {
+              draft: 0, data_upload: 0, design: 0, proof_ready: 0,
+              approved: 0, printing: 0, dispatched: 0, delivered: 0
+            },
+            withoutTemplate: 0,
+            totalQuantity: 0
+          },
           products: { total: productsData.length, active: productsData.length },
-          templates: { total: templatesData.length },
+          templates: { total: templatesData.length, public: 0 },
           payments: { total: 0, revenue: 0 },
-          complaints: { total: 0, open: 0, high: 0 },
+          complaints: { total: 0, open: 0, high: 0, highPriority: 0 },
           records: { total: 0 },
-          tasks: { pending: 0 },
+          tasks: { pending: 0, total: 0 },
+          financial: { totalValue: 0, paid: 0, pending: 0 },
+          dataRecords: { total: 0, byStatus: { pending: 0, processing: 0, completed: 0, error: 0 } },
         };
       } catch (error) {
         console.error('Failed to fetch admin stats:', error);
         return {
           vendors: { total: 0, active: 0 },
           clients: { total: 0, active: 0 },
-          projects: { total: 0 },
+          projects: {
+            total: 0,
+            byStatus: {
+              draft: 0, data_upload: 0, design: 0, proof_ready: 0,
+              approved: 0, printing: 0, dispatched: 0, delivered: 0
+            },
+            withoutTemplate: 0,
+            totalQuantity: 0
+          },
           products: { total: 0, active: 0 },
-          templates: { total: 0 },
+          templates: { total: 0, public: 0 },
           payments: { total: 0, revenue: 0 },
-          complaints: { total: 0, open: 0, high: 0 },
+          complaints: { total: 0, open: 0, high: 0, highPriority: 0 },
           records: { total: 0 },
-          tasks: { pending: 0 },
+          tasks: { pending: 0, total: 0 },
+          financial: { totalValue: 0, paid: 0, pending: 0 },
+          dataRecords: { total: 0, byStatus: { pending: 0, processing: 0, completed: 0, error: 0 } },
         };
       }
     },
-  });
-        projects: { total: projects.length, byStatus: projectsByStatus, withoutTemplate: projectsWithoutTemplate, totalQuantity },
-        payments: { total: payments.length, revenue: totalRevenue },
-        complaints: { total: complaints.length, open: openComplaints, highPriority: highPriorityComplaints },
-        products: { total: products.length, active: activeProducts },
-        templates: { total: templates.length, public: publicTemplates },
-        tasks: { total: tasks.length, pending: pendingTasks },
-        dataRecords: { total: dataRecords.length, byStatus: recordsByStatus },
-        financial: { totalValue: totalProjectValue, paid: totalPaid, pending: pendingAmount },
-      };
-    },
-    refetchInterval: 60000, // Refresh every minute
   });
 
   if (isLoading) {
@@ -177,8 +185,8 @@ export function EnhancedAdminOverview() {
     { label: 'Delivered', value: stats?.projects.byStatus.delivered || 0, icon: CheckCircle, color: 'text-emerald-500' },
   ];
 
-  const collectionRate = stats?.financial.totalValue 
-    ? Math.round((stats.financial.paid / stats.financial.totalValue) * 100) 
+  const collectionRate = stats?.financial.totalValue
+    ? Math.round((stats.financial.paid / stats.financial.totalValue) * 100)
     : 0;
 
   return (

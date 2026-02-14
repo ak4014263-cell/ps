@@ -47,7 +47,7 @@ export function BulkProductImport() {
 
   const validateRow = (row: any): ProductRow => {
     const errors: string[] = [];
-    
+
     if (!row.name?.trim()) errors.push('Name is required');
     if (!row.category?.trim()) errors.push('Category is required');
     if (!row.base_price || isNaN(parseFloat(row.base_price))) errors.push('Valid base price is required');
@@ -126,9 +126,7 @@ export function BulkProductImport() {
         active: row.active !== 'false',
       }));
 
-      const { error } = await supabase.from('products').insert(products);
-
-      if (error) throw error;
+      await apiService.productsAPI.bulkCreate(products);
 
       toast.success(`Successfully imported ${validRows.length} products`);
       queryClient.invalidateQueries({ queryKey: ['products'] });

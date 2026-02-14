@@ -15,27 +15,8 @@ export function VendorsList() {
   const { data: vendors = [], isLoading } = useQuery({
     queryKey: ['all-vendors'],
     queryFn: async () => {
-      const { data, error } = await supabase
-        .from('vendors')
-        .select('*')
-        .order('created_at', { ascending: false });
-
-      if (error) throw error;
-
-      // Fetch profiles separately
-      const vendorsWithProfiles = await Promise.all(
-        data.map(async (vendor) => {
-          const { data: profile } = await supabase
-            .from('profiles')
-            .select('full_name, email')
-            .eq('id', vendor.user_id)
-            .maybeSingle();
-
-          return { ...vendor, profile };
-        })
-      );
-
-      return vendorsWithProfiles;
+      const response = await apiService.vendorsAPI.getAll();
+      return (response.data || response || []);
     },
   });
 

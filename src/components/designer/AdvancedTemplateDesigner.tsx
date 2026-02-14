@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState, useCallback } from 'react';
-import { Canvas as FabricCanvas, Rect, Circle, Textbox, FabricImage, Line, Triangle, Polygon, Ellipse, Gradient } from 'fabric';
+import { Rect, Circle, Textbox, FabricImage, Line, Triangle, Polygon, Ellipse, Gradient, Point, Canvas as FabricCanvas } from 'fabric';
 import { gradientConfigToFabric } from './DesignerGradientPicker';
 import { DesignerToolbar, ToolType } from './DesignerToolbar';
 import { DesignerToolsSidebar, SidebarTab, ToolType as SidebarToolType } from './DesignerToolsSidebar';
@@ -22,6 +22,7 @@ import { DesignerCanvasToolbar } from './DesignerCanvasToolbar';
 import { DesignerPageManager, PageData } from './DesignerPageManager';
 import { CanvasOverlays } from './CanvasOverlays';
 import { CanvasRuler } from './CanvasRuler';
+import FabricCanvasComponent from './FabricCanvas'; // Import the new component
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Button } from '@/components/ui/button';
@@ -37,6 +38,8 @@ import { useAuth } from '@/hooks/useAuth';
 import { Settings } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import { setupAutoFontSizeListeners, applyAutoFontSize } from '@/lib/autoFontSize';
+import { VDPText, VDPFunctionType } from '@/lib/vdpText';
+import { DesignerVDPPanel } from './DesignerVDPPanel';
 
 const PRESET_SIZES = [
   { name: 'ID Card (CR80)', width: 85.6, height: 53.98 },
@@ -104,8 +107,6 @@ interface AdvancedTemplateDesignerProps {
  */
 export function AdvancedTemplateDesigner({ editTemplate, onBack, projectId, projectClient }: AdvancedTemplateDesignerProps) {
   const navigate = useNavigate();
-  const canvasRef = useRef<HTMLCanvasElement>(null);
-  const backCanvasRef = useRef<HTMLCanvasElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
   const [fabricCanvas, setFabricCanvas] = useState<FabricCanvas | null>(null);
   const [backFabricCanvas, setBackFabricCanvas] = useState<FabricCanvas | null>(null);
@@ -117,17 +118,17 @@ export function AdvancedTemplateDesigner({ editTemplate, onBack, projectId, proj
   const [zoom, setZoom] = useState(1);
   const [showGrid, setShowGrid] = useState(true);
   const [clipboard, setClipboard] = useState<any>(null);
-  
+
   // Pan tool state - use refs to avoid re-registering event handlers
   const isPanningRef = useRef(false);
   const lastPanPositionRef = useRef<{ x: number; y: number } | null>(null);
   const activeToolRef = useRef<ToolType>(activeTool);
-  
+
   // Keep ref in sync with state
   useEffect(() => {
     activeToolRef.current = activeTool;
   }, [activeTool]);
-  
+
   // History for undo/redo
   const [history, setHistory] = useState<string[]>([]);
   const [historyIndex, setHistoryIndex] = useState(-1);
@@ -144,54 +145,54 @@ export function AdvancedTemplateDesigner({ editTemplate, onBack, projectId, proj
   const [heightMm, setHeightMm] = useState(53.98);
   const [isPublic, setIsPublic] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
-  
+
   // Sidebar state
   const [activeSidebarTab, setActiveSidebarTab] = useState<SidebarTab | null>(null);
-  
+
   // Margin settings
   const [marginTop, setMarginTop] = useState(1);
   const [marginLeft, setMarginLeft] = useState(1);
   const [marginRight, setMarginRight] = useState(1);
   const [marginBottom, setMarginBottom] = useState(1);
-  
+
   // Background state
   const [backgroundColor, setBackgroundColor] = useState('#ffffff');
   const [hasBackgroundImage, setHasBackgroundImage] = useState(false);
-  
+
   // Snap to grid state
   const [snapToGrid, setSnapToGrid] = useState(true);
   const [gridSize, setGridSize] = useState(10);
-  
+
   // Guides state
   const [showGuides, setShowGuides] = useState(true);
   const [showTopIndicator, setShowTopIndicator] = useState(true);
   const [bleedMm, setBleedMm] = useState(3);
   const [safeZoneMm, setSafeZoneMm] = useState(4);
-  
+
   // Custom fonts and shapes
   const [customFonts, setCustomFonts] = useState<string[]>([]);
   const [customShapes, setCustomShapes] = useState<{ name: string; url: string }[]>([]);
-  
+
   // Context menu state
   const [contextMenu, setContextMenu] = useState<{ visible: boolean; x: number; y: number }>({
     visible: false,
     x: 0,
     y: 0,
   });
-  
+
   // Manual save only (auto-save removed)
-  
+
   // Data preview state
   const [isPreviewMode, setIsPreviewMode] = useState(false);
   const [previewData, setPreviewData] = useState<Record<string, string>>({});
   const [detectedVariables, setDetectedVariables] = useState<string[]>([]);
-  
+
   // Multi-page state
   const [pages, setPages] = useState<PageData[]>([
     { id: crypto.randomUUID(), name: 'Page 1', designJson: null }
   ]);
   const [currentPageIndex, setCurrentPageIndex] = useState(0);
-  
+
   // Store last used text settings for new text elements
   const lastTextSettingsRef = useRef({
     fontSize: 14,
@@ -206,94 +207,13 @@ export function AdvancedTemplateDesigner({ editTemplate, onBack, projectId, proj
   const { user } = useAuth();
   const activeCanvas = activeSide === 'front' ? fabricCanvas : backFabricCanvas;
 
-  // Fetch vendor_id for the current user
-  const { data: vendorData } = useQuery({
-    queryKey: ['vendor', user?.id],
-    queryFn: async () => {
-      if (!user?.id) return null;
-      const vendors = await apiService.vendorsAPI.getAll();
-      return vendors.find((v: any) => v.user_id === user.id);
-    },
-    enabled: !!user?.id,
-  });
-
-  // Fetch library shapes for the vendor (to use as profile pic masks)
-  const { data: libraryShapes = [] } = useQuery({
-    queryKey: ['library-shapes-for-designer', vendorData?.id],
-    queryFn: async () => {
-      if (!vendorData?.id) return [];
-      try {
-        const response = await fetch(`http://localhost:3001/api/library-shapes?vendor_id=${vendorData.id}`);
-        if (!response.ok) return [];
-        return response.json();
-      } catch (error) {
-        console.error('Failed to fetch library shapes:', error);
-        return [];
-      }
-    },
-    enabled: !!vendorData?.id,
-  });
-
-  // Combine local custom shapes with library shapes
-  const allCustomShapes = [
-    ...customShapes,
-    ...libraryShapes.map((s: any) => ({ name: s.name, url: s.shape_url }))
-  ];
-
-  // Auto-populate client data when opening from a project context
-  useEffect(() => {
-    if (projectClient && fabricCanvas) {
-      const clientData: Record<string, string> = {
-        institution_name: projectClient.institution_name || '',
-        client_name: projectClient.name || '',
-        client_phone: projectClient.phone || '',
-        client_email: projectClient.email || '',
-        client_designation: projectClient.designation || '',
-        client_address: projectClient.address || '',
-        client_city: projectClient.city || '',
-        client_state: projectClient.state || '',
-        client_pincode: projectClient.pincode || '',
-        company_logo: projectClient.logo_url || '',
-        company_signature: projectClient.signature_url || '',
-      };
-      
-      // Merge with existing preview data (don't overwrite student data if any)
-      setPreviewData(prev => ({ ...prev, ...clientData }));
-      
-      // Show a toast notification
-      toast.info(`Client "${projectClient.institution_name}" data loaded from project`);
-    }
-  }, [projectClient, fabricCanvas]);
-
-  // Convert mm to pixels (96 DPI / 25.4)
-  const mmToPixels = 3.78;
-
-  // Escape string for use in RegExp construction
-  const escapeRegExp = (s: string) => s.replace(/[.*+?^${}()|[\\]\\\\]/g, '\\$&');
-
-  // Initialize canvas
-  useEffect(() => {
-    if (!canvasRef.current) return;
-
-    const canvasWidth = widthMm * mmToPixels;
-    const canvasHeight = heightMm * mmToPixels;
-
-    const canvas = new FabricCanvas(canvasRef.current, {
-      width: canvasWidth,
-      height: canvasHeight,
-      backgroundColor: '#ffffff',
-      selection: true,
-      preserveObjectStacking: true,
-      enableRetinaScaling: false, // Disable to prevent blurry text
-      imageSmoothingEnabled: false, // Disable for sharper text rendering
-    });
-
+  const setupCanvas = (canvas: FabricCanvas) => {
     // Create a clip path to constrain objects within canvas bounds
     const clipRect = new Rect({
       left: 0,
       top: 0,
-      width: canvasWidth,
-      height: canvasHeight,
+      width: canvas.getWidth(),
+      height: canvas.getHeight(),
       absolutePositioned: true,
     });
     canvas.clipPath = clipRect;
@@ -301,18 +221,7 @@ export function AdvancedTemplateDesigner({ editTemplate, onBack, projectId, proj
     // Set selection style for dotted borders
     canvas.selectionBorderColor = 'hsl(var(--primary))';
     canvas.selectionLineWidth = 1;
-    /**
-     * Canvas Event Handlers
-     *
-     * selection:created / selection:updated / selection:cleared
-     * - Manage visual selection styling and prevent selecting locked/background objects
-     * - Update `selectedObject` state and ensure editor tool is set to `select`
-     *
-     * object:modified
-     * - Persist changes to history via `saveToHistory()` and refresh the objects list
-     * - For `textbox` objects, converts scale into explicit width/height to keep text crisp
-     * - Recomputes layout after dimension changes (important when lineHeight or wrapping change)
-     */
+
     canvas.on('selection:created', (e) => {
       const selected = e.selected?.[0] as any;
       // Prevent selecting locked background
@@ -370,7 +279,7 @@ export function AdvancedTemplateDesigner({ editTemplate, onBack, projectId, proj
     canvas.on('object:modified', (e) => {
       saveToHistory();
       updateObjectsList();
-      
+
       // Handle textbox resize: keep text crisp by converting scale into dimensions (not font scaling)
       const obj = e.target as any;
       if (obj && (obj.type === 'textbox' || obj.type === 'i-text')) {
@@ -404,10 +313,10 @@ export function AdvancedTemplateDesigner({ editTemplate, onBack, projectId, proj
       if (!isHistoryActionRef.current) saveToHistory();
       updateObjectsList();
     });
-    
+
     // Note: object:moving and object:scaling handlers are set up in the alignment guides effect
     // to allow combining boundary constraints with alignment snap functionality
-    
+
     // Store original position and scale when object is selected (for locked objects)
     canvas.on('mouse:down', (e) => {
       const obj = e.target as any;
@@ -419,8 +328,6 @@ export function AdvancedTemplateDesigner({ editTemplate, onBack, projectId, proj
       }
     });
 
-    setFabricCanvas(canvas);
-    
     // Initial history save
     setTimeout(() => {
       const initialState = JSON.stringify(canvas.toObject());
@@ -429,11 +336,114 @@ export function AdvancedTemplateDesigner({ editTemplate, onBack, projectId, proj
       setHistoryIndex(0);
       historyIndexRef.current = 0;
     }, 100);
+  };
 
-    return () => {
-      canvas.dispose();
-    };
-  }, []);
+  const handleFrontCanvasReady = (canvas: FabricCanvas) => {
+    setupCanvas(canvas);
+    setFabricCanvas(canvas);
+
+    // Initial history save
+    setTimeout(() => {
+      const initialState = JSON.stringify(canvas.toObject());
+      setHistory([initialState]);
+      historyRef.current = [initialState];
+      setHistoryIndex(0);
+      historyIndexRef.current = 0;
+    }, 100);
+  };
+
+  const handleBackCanvasReady = (canvas: FabricCanvas) => {
+    setupCanvas(canvas);
+    setBackFabricCanvas(canvas);
+
+    // No separate history for back canvas for now, might need adjustment
+  };
+
+  // Fetch vendor_id for the current user
+  const { data: vendorData } = useQuery({
+    queryKey: ['vendor', user?.id],
+    queryFn: async () => {
+      if (!user?.id) return null;
+      try {
+        // Use the optimized endpoint
+        return await apiService.vendorsAPI.getByUserId(user.id);
+      } catch (error) {
+        console.error('Failed to fetch vendor:', error);
+        return null;
+      }
+    },
+    enabled: !!user?.id,
+  });
+
+  // Fetch library shapes for the vendor (to use as profile pic masks)
+  const { data: libraryShapes = [] } = useQuery({
+    queryKey: ['library-shapes-for-designer', vendorData?.id],
+    queryFn: async () => {
+      if (!vendorData?.id) return [];
+      try {
+        const result = await apiService.libraryAPI.getShapes(vendorData.id);
+        return result.data || result || [];
+      } catch (error) {
+        console.error('Failed to fetch library shapes:', error);
+        return [];
+      }
+    },
+    enabled: !!vendorData?.id,
+  });
+
+  // Combine local custom shapes with library shapes
+  const allCustomShapes = [
+    ...customShapes,
+    ...libraryShapes.map((s: any) => ({ name: s.name, url: s.shape_url }))
+  ];
+
+  // Auto-populate vendor data into preview
+  useEffect(() => {
+    if (vendorData) {
+      const vendorPreviewData: Record<string, string> = {
+        vendor_name: vendorData.business_name || '',
+        vendor_email: vendorData.email || '',
+        vendor_phone: vendorData.phone || '',
+        vendor_address: vendorData.address || '',
+        vendor_city: vendorData.city || '',
+        vendor_state: vendorData.state || '',
+        vendor_logo: vendorData.logo_url || '',
+        vendor_website: vendorData.website || '',
+      };
+      setPreviewData(prev => ({ ...prev, ...vendorPreviewData }));
+    }
+  }, [vendorData]);
+
+  // Auto-populate client data when opening from a project context
+  useEffect(() => {
+    if (projectClient && fabricCanvas) {
+      const clientData: Record<string, string> = {
+        institution_name: projectClient.institution_name || '',
+        client_name: projectClient.name || '',
+        client_phone: projectClient.phone || '',
+        client_email: projectClient.email || '',
+        client_designation: projectClient.designation || '',
+        client_address: projectClient.address || '',
+        client_city: projectClient.city || '',
+        client_state: projectClient.state || '',
+        client_pincode: projectClient.pincode || '',
+        company_logo: projectClient.logo_url || '',
+        company_signature: projectClient.signature_url || '',
+      };
+
+      // Merge with existing preview data (don't overwrite student data if any)
+      setPreviewData(prev => ({ ...prev, ...clientData }));
+
+      // Show a toast notification
+      toast.info(`Client "${projectClient.institution_name}" data loaded from project`);
+    }
+  }, [projectClient, fabricCanvas]);
+
+  // Convert mm to pixels (96 DPI / 25.4)
+  const mmToPixels = 3.78;
+
+  // Escape string for use in RegExp construction
+  const escapeRegExp = (s: string) => s.replace(/[.*+?^${}()|[\\]\\\\]/g, '\\$&');
 
   // Update canvas size and clip path when dimensions change
   useEffect(() => {
@@ -441,12 +451,12 @@ export function AdvancedTemplateDesigner({ editTemplate, onBack, projectId, proj
     try {
       const canvasWidth = widthMm * mmToPixels;
       const canvasHeight = heightMm * mmToPixels;
-      
+
       fabricCanvas.setDimensions({
         width: canvasWidth,
         height: canvasHeight,
       });
-      
+
       // Update clip path to match new dimensions
       const clipRect = new Rect({
         left: 0,
@@ -456,7 +466,7 @@ export function AdvancedTemplateDesigner({ editTemplate, onBack, projectId, proj
         absolutePositioned: true,
       });
       fabricCanvas.clipPath = clipRect;
-      
+
       fabricCanvas.requestRenderAll();
     } catch (e) {
       // Canvas may have been disposed
@@ -466,22 +476,22 @@ export function AdvancedTemplateDesigner({ editTemplate, onBack, projectId, proj
   // Smart alignment guides and snap-to-grid behavior
   useEffect(() => {
     if (!fabricCanvas) return;
-    
+
     const aligningLineMargin = 5; // Threshold for showing alignment guides
     const aligningLineOffset = 5;
     const aligningLineColor = 'hsl(var(--primary))';
     const aligningLineWidth = 1;
-    
+
     let verticalLines: any[] = [];
     let horizontalLines: any[] = [];
-    
+
     const clearGuidelines = () => {
       verticalLines.forEach(line => fabricCanvas.remove(line));
       horizontalLines.forEach(line => fabricCanvas.remove(line));
       verticalLines = [];
       horizontalLines = [];
     };
-    
+
     const drawVerticalLine = (x: number) => {
       const line = new Line([x, 0, x, fabricCanvas.height || 0], {
         stroke: aligningLineColor,
@@ -494,7 +504,7 @@ export function AdvancedTemplateDesigner({ editTemplate, onBack, projectId, proj
       verticalLines.push(line);
       fabricCanvas.add(line);
     };
-    
+
     const drawHorizontalLine = (y: number) => {
       const line = new Line([0, y, fabricCanvas.width || 0, y], {
         stroke: aligningLineColor,
@@ -507,11 +517,11 @@ export function AdvancedTemplateDesigner({ editTemplate, onBack, projectId, proj
       horizontalLines.push(line);
       fabricCanvas.add(line);
     };
-    
+
     const handleObjectMoving = (e: any) => {
       const movingObj = e.target;
       if (!movingObj) return;
-      
+
       // Prevent ALL object movement when pan tool is active
       if (activeToolRef.current === 'pan') {
         const originalLeft = movingObj._originalLeft ?? movingObj.left;
@@ -524,7 +534,7 @@ export function AdvancedTemplateDesigner({ editTemplate, onBack, projectId, proj
         fabricCanvas.requestRenderAll();
         return;
       }
-      
+
       // Prevent movement of locked objects - always check lock state
       if (movingObj.lockMovementX === true && movingObj.lockMovementY === true) {
         // Restore to original position
@@ -538,34 +548,34 @@ export function AdvancedTemplateDesigner({ editTemplate, onBack, projectId, proj
         fabricCanvas.requestRenderAll();
         return;
       }
-      
+
       // Clear previous guidelines
       clearGuidelines();
-      
+
       // Get object dimensions for boundary checking
       const movingWidth = (movingObj.width || 0) * (movingObj.scaleX || 1);
       const movingHeight = (movingObj.height || 0) * (movingObj.scaleY || 1);
       const canvasWidth = fabricCanvas.width || 0;
       const canvasHeight = fabricCanvas.height || 0;
-      
+
       // Apply grid snapping if enabled
       let newLeft = movingObj.left || 0;
       let newTop = movingObj.top || 0;
-      
+
       if (snapToGrid) {
         newLeft = Math.round(newLeft / gridSize) * gridSize;
         newTop = Math.round(newTop / gridSize) * gridSize;
       }
-      
+
       // Constrain position within canvas bounds
       newLeft = Math.max(0, Math.min(newLeft, canvasWidth - movingWidth));
       newTop = Math.max(0, Math.min(newTop, canvasHeight - movingHeight));
-      
+
       movingObj.set({ left: newLeft, top: newTop });
-      
+
       // Update coords before getting bounds for accurate measurements
       movingObj.setCoords();
-      
+
       // Recalculate bounds after constraining
       const movingLeft = movingObj.left || 0;
       const movingTop = movingObj.top || 0;
@@ -573,11 +583,11 @@ export function AdvancedTemplateDesigner({ editTemplate, onBack, projectId, proj
       const movingCenterY = movingTop + movingHeight / 2;
       const movingRight = movingLeft + movingWidth;
       const movingBottom = movingTop + movingHeight;
-      
+
       // Check alignment with other objects
       fabricCanvas.getObjects().forEach((obj: any) => {
         if (obj === movingObj || obj.data?.isGuideline) return;
-        
+
         const objLeft = obj.left || 0;
         const objTop = obj.top || 0;
         const objWidth = (obj.width || 0) * (obj.scaleX || 1);
@@ -586,7 +596,7 @@ export function AdvancedTemplateDesigner({ editTemplate, onBack, projectId, proj
         const objCenterY = objTop + objHeight / 2;
         const objRight = objLeft + objWidth;
         const objBottom = objTop + objHeight;
-        
+
         // Vertical alignments (left, center, right) - with boundary check
         if (Math.abs(movingLeft - objLeft) < aligningLineMargin) {
           const targetLeft = Math.max(0, Math.min(objLeft, canvasWidth - movingWidth));
@@ -603,7 +613,7 @@ export function AdvancedTemplateDesigner({ editTemplate, onBack, projectId, proj
           drawVerticalLine(objRight);
           movingObj.set('left', targetLeft);
         }
-        
+
         // Horizontal alignments (top, center, bottom) - with boundary check
         if (Math.abs(movingTop - objTop) < aligningLineMargin) {
           const targetTop = Math.max(0, Math.min(objTop, canvasHeight - movingHeight));
@@ -621,7 +631,7 @@ export function AdvancedTemplateDesigner({ editTemplate, onBack, projectId, proj
           movingObj.set('top', targetTop);
         }
       });
-      
+
       // Check canvas center alignment - with boundary check
       if (Math.abs(movingCenterX - canvasWidth / 2) < aligningLineMargin) {
         const targetLeft = Math.max(0, Math.min(canvasWidth / 2 - movingWidth / 2, canvasWidth - movingWidth));
@@ -633,11 +643,25 @@ export function AdvancedTemplateDesigner({ editTemplate, onBack, projectId, proj
         drawHorizontalLine(canvasHeight / 2);
         movingObj.set('top', targetTop);
       }
-      
+
+      // Update associated text object for variable boxes
+      if (movingObj.data?.type === 'variable-box') {
+        const padding = movingObj.data?.padding ?? 8;
+        const textObj = movingObj.data?.textObject || fabricCanvas.getObjects().find((o: any) => o?.data?.type === 'variable-text' && o?.data?.field === movingObj.data?.field);
+
+        if (textObj) {
+          textObj.set({
+            left: (movingObj.left || 0) + padding,
+            top: (movingObj.top || 0) + padding,
+          });
+          textObj.setCoords();
+        }
+      }
+
       // Update coords after any snapping adjustments
       movingObj.setCoords();
     };
-    
+
     // Handle object scaling - constrain within canvas bounds and handle textbox resizing
     const handleObjectScaling = (e: any) => {
       const obj = e.target;
@@ -762,24 +786,16 @@ export function AdvancedTemplateDesigner({ editTemplate, onBack, projectId, proj
         const padding = obj.data?.padding ?? 8;
         const baseWidth = obj.width || obj.data?.boxWidth || 100;
         const baseHeight = obj.height || obj.data?.boxHeight || 30;
-        
+
         // Calculate new dimensions from scaling
         const currentWidth = baseWidth * (obj.scaleX || 1);
         const currentHeight = baseHeight * (obj.scaleY || 1);
-        
-        // Ensure minimum size
-        const minWidth = 40;
-        const minHeight = 20;
+
+        // Ensure minimum size - allow small sizes for free resizing
+        const minWidth = 10;
+        const minHeight = 10;
         const constrainedWidth = Math.max(minWidth, currentWidth);
         const constrainedHeight = Math.max(minHeight, currentHeight);
-        
-        // Apply the constrained dimensions directly to avoid scaling issues
-        obj.set({
-          width: constrainedWidth,
-          height: constrainedHeight,
-          scaleX: 1,
-          scaleY: 1,
-        });
 
         // Find the associated text object (prefer stored ref)
         let textObj: any = obj.data?.textObject;
@@ -787,9 +803,12 @@ export function AdvancedTemplateDesigner({ editTemplate, onBack, projectId, proj
           textObj = fabricCanvas.getObjects().find((o: any) => o?.data?.type === 'variable-text' && o?.data?.field === obj.data?.field);
         }
 
+        // Apply text resizing based on CURRENT visual dimensions (width * scale) without resetting scale on the box yet
+        // This prevents "fighting" with the active transform
         if (textObj) {
           const textWidth = Math.max(constrainedWidth - padding * 2, 20);
           const textHeight = Math.max(constrainedHeight - padding * 2, (textObj.data?.originalFontSize || 14));
+
           textObj.set({
             left: (obj.left || 0) + padding,
             top: (obj.top || 0) + padding,
@@ -809,28 +828,28 @@ export function AdvancedTemplateDesigner({ editTemplate, onBack, projectId, proj
 
         // Constrain box within canvas bounds
         let rect = obj.getBoundingRect(true, true);
-        
+
         if (rect.left < 0) {
           obj.set({ left: (obj.left || 0) - rect.left });
         }
-        
+
         rect = obj.getBoundingRect(true, true);
         if (rect.left + rect.width > canvasWidth) {
           const overflowX = rect.left + rect.width - canvasWidth;
           obj.set({ left: (obj.left || 0) - overflowX });
         }
-        
+
         rect = obj.getBoundingRect(true, true);
         if (rect.top < 0) {
           obj.set({ top: (obj.top || 0) - rect.top });
         }
-        
+
         rect = obj.getBoundingRect(true, true);
         if (rect.top + rect.height > canvasHeight) {
           const overflowY = rect.top + rect.height - canvasHeight;
           obj.set({ top: (obj.top || 0) - overflowY });
         }
-        
+
         obj.setCoords();
         fabricCanvas.requestRenderAll();
         return;
@@ -877,7 +896,7 @@ export function AdvancedTemplateDesigner({ editTemplate, onBack, projectId, proj
         obj.setCoords();
       }
     };
-    
+
     // Handle object modified - convert textbox scaling to width change after scaling is done
     const handleObjectModified = (e: any) => {
       const obj = e.target;
@@ -941,27 +960,65 @@ export function AdvancedTemplateDesigner({ editTemplate, onBack, projectId, proj
 
       // Normalize variable-box dimensions after scaling/modification
       if (obj?.data?.type === 'variable-box') {
-        // Store the new dimensions in data for persistence
-        const width = obj.width || 100;
-        const height = obj.height || 30;
-        
+        const scaleX = obj.scaleX || 1;
+        const scaleY = obj.scaleY || 1;
+
+        // Calculate new actual dimensions
+        const baseWidth = obj.width || 100;
+        const baseHeight = obj.height || 30;
+        const newWidth = baseWidth * scaleX;
+        const newHeight = baseHeight * scaleY;
+
+        // Apply new dimensions and reset scale
+        obj.set({
+          width: newWidth,
+          height: newHeight,
+          scaleX: 1,
+          scaleY: 1
+        });
+
+        // Update stored data
         obj.set('data', {
           ...obj.data,
-          boxWidth: width,
-          boxHeight: height,
+          boxWidth: newWidth,
+          boxHeight: newHeight,
         });
+
+        // Refresh text position to match normalized box
+        const padding = obj.data?.padding ?? 8;
+        const textObj = obj.data?.textObject || fabricCanvas.getObjects().find((o: any) => o?.data?.type === 'variable-text' && o?.data?.field === obj.data?.field);
+
+        if (textObj) {
+          const textWidth = Math.max(newWidth - padding * 2, 20);
+          const textHeight = Math.max(newHeight - padding * 2, (textObj.data?.originalFontSize || 14));
+
+          textObj.set({
+            left: (obj.left || 0) + padding,
+            top: (obj.top || 0) + padding,
+            width: textWidth,
+            height: textHeight
+          });
+          textObj.setCoords();
+
+          if (textObj.clipPath) {
+            textObj.clipPath.set({
+              width: textWidth,
+              height: textHeight
+            });
+          }
+        }
 
         obj.setCoords();
         fabricCanvas.requestRenderAll();
         try { if (!isHistoryActionRef.current) saveToHistory(); } catch (e) { /* ignore */ }
       }
     };
-    
+
     const handleMouseUp = () => {
       clearGuidelines();
       fabricCanvas.requestRenderAll();
     };
-    
+
     fabricCanvas.off('object:moving');
     fabricCanvas.off('object:scaling');
     fabricCanvas.off('object:modified');
@@ -970,7 +1027,7 @@ export function AdvancedTemplateDesigner({ editTemplate, onBack, projectId, proj
     fabricCanvas.on('object:scaling', handleObjectScaling);
     fabricCanvas.on('object:modified', handleObjectModified);
     fabricCanvas.on('mouse:up', handleMouseUp);
-    
+
     return () => {
       fabricCanvas.off('object:moving', handleObjectMoving);
       fabricCanvas.off('object:scaling', handleObjectScaling);
@@ -980,196 +1037,11 @@ export function AdvancedTemplateDesigner({ editTemplate, onBack, projectId, proj
     };
   }, [fabricCanvas, snapToGrid, gridSize]);
 
-  // Initialize back canvas when enabled
-  useEffect(() => {
-    if (!hasBackSide || !backCanvasRef.current || backFabricCanvas) return;
-
-    const canvas = new FabricCanvas(backCanvasRef.current, {
-      width: widthMm * mmToPixels,
-      height: heightMm * mmToPixels,
-      backgroundColor: '#ffffff',
-      selection: true,
-      preserveObjectStacking: true,
-      enableRetinaScaling: false, // Disable to prevent blurry text
-      imageSmoothingEnabled: false, // Disable for sharper text rendering
-    });
-
-    // Set selection style for dotted borders
-    canvas.selectionBorderColor = 'hsl(var(--primary))';
-    canvas.selectionLineWidth = 1;
-    
-    /**
-     * Back-canvas Event Handlers
-     *
-     * selection:created / selection:updated / selection:cleared
-     * - Apply selection styling and update `selectedObject` state for the back canvas
-     *
-     * object:modified
-     * - Update object list and normalize text scaling to fontSize for crisp text
-     *
-     * object:added / object:removed
-     * - Keep UI object listing synchronized via `updateObjectsList()`
-     *
-     * object:moving / object:scaling
-     * - Enforce canvas bounds and optional grid snapping for the back canvas
-     */
-    canvas.on('selection:created', (e) => {
-      const selected = e.selected?.[0];
-      if (selected) {
-        selected.set({
-          borderColor: 'hsl(var(--primary))',
-          borderDashArray: [4, 4],
-          cornerColor: 'hsl(var(--primary))',
-          cornerSize: 8,
-          cornerStyle: 'circle',
-          transparentCorners: false,
-        });
-        canvas.requestRenderAll();
-      }
-      setSelectedObject(selected);
-      setActiveTool('select');
-    });
-    canvas.on('selection:updated', (e) => {
-      const selected = e.selected?.[0];
-      if (selected) {
-        selected.set({
-          borderColor: 'hsl(var(--primary))',
-          borderDashArray: [4, 4],
-          cornerColor: 'hsl(var(--primary))',
-          cornerSize: 8,
-          cornerStyle: 'circle',
-          transparentCorners: false,
-        });
-        canvas.requestRenderAll();
-      }
-      setSelectedObject(selected);
-    });
-    canvas.on('selection:cleared', () => {
-      setSelectedObject(null);
-    });
-    canvas.on('object:modified', (e) => {
-      updateObjectsList();
-      
-      // Handle text scaling - adjust font size instead of scale for crisp text
-      const obj = e.target as any;
-      if (obj && (obj.type === 'textbox' || obj.type === 'i-text')) {
-        const scaleX = obj.scaleX || 1;
-        const scaleY = obj.scaleY || 1;
-        if (scaleX !== 1 || scaleY !== 1) {
-          const currentFontSize = obj.fontSize || 16;
-          const newFontSize = Math.round(currentFontSize * Math.max(scaleX, scaleY));
-          obj.set({
-            fontSize: newFontSize,
-            scaleX: 1,
-            scaleY: 1,
-            width: (obj.width || 100) * scaleX,
-          });
-          canvas.requestRenderAll();
-        }
-      }
-    });
-    canvas.on('object:added', updateObjectsList);
-    canvas.on('object:removed', updateObjectsList);
-    
-    // Constrain objects within canvas bounds on moving (for back canvas)
-    canvas.on('object:moving', (e) => {
-      // Prevent ALL object movement when pan tool is active (for back canvas)
-      if (activeToolRef.current === 'pan') {
-        const obj = e.target as any;
-        if (obj) {
-          obj.set({
-            left: obj._originalLeft ?? obj.left,
-            top: obj._originalTop ?? obj.top,
-          });
-          obj.setCoords();
-          canvas.requestRenderAll();
-        }
-        return;
-      }
-      const obj = e.target as any;
-      if (!obj) return;
-      
-      const objWidth = (obj.width || 0) * (obj.scaleX || 1);
-      const objHeight = (obj.height || 0) * (obj.scaleY || 1);
-      const canvasWidth = canvas.width || 0;
-      const canvasHeight = canvas.height || 0;
-      
-      let newLeft = obj.left || 0;
-      let newTop = obj.top || 0;
-      
-      // Constrain and apply grid snap
-      newLeft = Math.max(0, Math.min(newLeft, canvasWidth - objWidth));
-      newTop = Math.max(0, Math.min(newTop, canvasHeight - objHeight));
-      
-      if (snapToGrid) {
-        newLeft = Math.round(newLeft / gridSize) * gridSize;
-        newTop = Math.round(newTop / gridSize) * gridSize;
-        newLeft = Math.max(0, Math.min(newLeft, canvasWidth - objWidth));
-        newTop = Math.max(0, Math.min(newTop, canvasHeight - objHeight));
-      }
-      
-      obj.set({ left: newLeft, top: newTop });
-    });
-    
-    // Constrain objects within canvas bounds on scaling (for back canvas)
-    canvas.on('object:scaling', (e) => {
-      const obj = e.target as any;
-      if (!obj) return;
-      
-      // Prevent scaling of locked objects
-      if (obj.lockScalingX === true && obj.lockScalingY === true) {
-        obj.set({
-          scaleX: obj._originalScaleX ?? obj.scaleX ?? 1,
-          scaleY: obj._originalScaleY ?? obj.scaleY ?? 1,
-        });
-        obj.setCoords();
-        canvas.requestRenderAll();
-        return;
-      }
-      
-      const canvasWidth = canvas.width || 0;
-      const canvasHeight = canvas.height || 0;
-      const objLeft = obj.left || 0;
-      const objTop = obj.top || 0;
-      
-      const maxWidth = canvasWidth - objLeft;
-      const maxHeight = canvasHeight - objTop;
-      const currentWidth = (obj.width || 0) * (obj.scaleX || 1);
-      const currentHeight = (obj.height || 0) * (obj.scaleY || 1);
-      
-      if (currentWidth > maxWidth || currentHeight > maxHeight) {
-        const scaleX = Math.min(obj.scaleX || 1, maxWidth / (obj.width || 1));
-        const scaleY = Math.min(obj.scaleY || 1, maxHeight / (obj.height || 1));
-        obj.set({ scaleX, scaleY });
-      }
-      
-      if (objLeft < 0) obj.set({ left: 0 });
-      if (objTop < 0) obj.set({ top: 0 });
-    });
-    
-    // Add clip path for back canvas
-    const clipRect = new Rect({
-      left: 0,
-      top: 0,
-      width: widthMm * mmToPixels,
-      height: heightMm * mmToPixels,
-      absolutePositioned: true,
-    });
-    canvas.clipPath = clipRect;
-
-    setBackFabricCanvas(canvas);
-
-    return () => {
-      canvas.dispose();
-      setBackFabricCanvas(null);
-    };
-  }, [hasBackSide, snapToGrid, gridSize]);
-
   // Set up auto font size listeners for both canvases
   useEffect(() => {
-    const cleanupFront = fabricCanvas ? setupAutoFontSizeListeners(fabricCanvas) : () => {};
-    const cleanupBack = backFabricCanvas ? setupAutoFontSizeListeners(backFabricCanvas) : () => {};
-    
+    const cleanupFront = fabricCanvas ? setupAutoFontSizeListeners(fabricCanvas) : () => { };
+    const cleanupBack = backFabricCanvas ? setupAutoFontSizeListeners(backFabricCanvas) : () => { };
+
     return () => {
       cleanupFront();
       cleanupBack();
@@ -1188,10 +1060,10 @@ export function AdvancedTemplateDesigner({ editTemplate, onBack, projectId, proj
 
       if (editTemplate.design_json) {
         const designJson = editTemplate.design_json;
-        
+
         // Mark as history action to prevent duplicate saves during load
         isHistoryActionRef.current = true;
-        
+
         // Check if template has multi-page data
         if (designJson.__pages && Array.isArray(designJson.__pages)) {
           // Load pages from saved data
@@ -1202,7 +1074,7 @@ export function AdvancedTemplateDesigner({ editTemplate, onBack, projectId, proj
           }));
           setPages(loadedPages);
           setCurrentPageIndex(0);
-          
+
           // Load first page content
           if (loadedPages[0]?.designJson) {
             // Remove __pages from the design JSON before loading
@@ -1232,7 +1104,7 @@ export function AdvancedTemplateDesigner({ editTemplate, onBack, projectId, proj
           delete cleanDesign.__pages;
           setPages([{ id: crypto.randomUUID(), name: 'Page 1', designJson: cleanDesign }]);
           setCurrentPageIndex(0);
-          
+
           fabricCanvas.loadFromJSON(cleanDesign).then(() => {
             // Restore lock state for all objects after loading
             // Use setTimeout to ensure canvas is fully loaded before restoring
@@ -1263,7 +1135,7 @@ export function AdvancedTemplateDesigner({ editTemplate, onBack, projectId, proj
     canvas.getObjects().forEach((obj: any) => {
       // Skip guideline objects
       if (obj.data?.isGuideline) return;
-      
+
       // Check if object is locked - normalize possible value types
       // (boolean true, string 'true', numeric 1) to a boolean
       const lockMovementXRaw = obj.lockMovementX;
@@ -1274,8 +1146,8 @@ export function AdvancedTemplateDesigner({ editTemplate, onBack, projectId, proj
 
       // Determine if object is locked: both X and Y must be true-ish
       const isLocked = lockMovementX && lockMovementY;
-      
-        if (isLocked) {
+
+      if (isLocked) {
         // Object is locked - restore all lock properties and disable interaction
         obj.set({
           lockMovementX: true,
@@ -1360,33 +1232,33 @@ export function AdvancedTemplateDesigner({ editTemplate, onBack, projectId, proj
    */
   const saveToHistory = useCallback(() => {
     if (!activeCanvas || isHistoryActionRef.current) return;
-    
+
     // Clear any existing debounce timeout
     if (historyDebounceRef.current) {
       clearTimeout(historyDebounceRef.current);
     }
-    
+
     // Mark that we have a pending save
     pendingHistorySaveRef.current = true;
-    
+
     // Debounce history saves to group rapid changes into one history entry
     historyDebounceRef.current = setTimeout(() => {
       if (!pendingHistorySaveRef.current || !activeCanvas) return;
-      
+
       const json = JSON.stringify(activeCanvas.toObject());
       const currentIndex = historyIndexRef.current; // Use ref for accurate current index
       const currentHistory = historyRef.current; // Use ref for accurate history
-      
+
       // Don't save if it's the same as the current state
       if (currentHistory[currentIndex] === json) {
         pendingHistorySaveRef.current = false;
         return;
       }
-      
+
       // When adding new state, cut off any redo history (states after current index)
       const newHistory = currentHistory.slice(0, currentIndex + 1);
       newHistory.push(json);
-      
+
       // Keep only last 50 states
       if (newHistory.length > 50) {
         newHistory.shift();
@@ -1394,12 +1266,12 @@ export function AdvancedTemplateDesigner({ editTemplate, onBack, projectId, proj
       } else {
         historyIndexRef.current = newHistory.length - 1;
       }
-      
+
       // Update both ref and state
       historyRef.current = newHistory;
       setHistory(newHistory);
       setHistoryIndex(historyIndexRef.current);
-      
+
       pendingHistorySaveRef.current = false;
     }, 300);
   }, [activeCanvas]);
@@ -1410,13 +1282,13 @@ export function AdvancedTemplateDesigner({ editTemplate, onBack, projectId, proj
       if (!activeCanvas) return;
       const activeObject = activeCanvas.getActiveObject();
       if (!activeObject) return;
-      
+
       // Don't handle if we're editing text
       if (activeObject.type === 'textbox' && (activeObject as any).isEditing) return;
-      
+
       const moveAmount = e.shiftKey ? 10 : 1; // Shift for larger moves
       let moved = false;
-      
+
       switch (e.key) {
         case 'ArrowUp':
           activeObject.set('top', (activeObject.top || 0) - moveAmount);
@@ -1435,7 +1307,7 @@ export function AdvancedTemplateDesigner({ editTemplate, onBack, projectId, proj
           moved = true;
           break;
       }
-      
+
       if (moved) {
         e.preventDefault();
         activeObject.setCoords();
@@ -1443,7 +1315,7 @@ export function AdvancedTemplateDesigner({ editTemplate, onBack, projectId, proj
         saveToHistory();
       }
     };
-    
+
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
   }, [activeCanvas, saveToHistory]);
@@ -1457,18 +1329,18 @@ export function AdvancedTemplateDesigner({ editTemplate, onBack, projectId, proj
   const handleUndo = useCallback(() => {
     const currentIndex = historyIndexRef.current;
     const currentHistory = historyRef.current;
-    
+
     if (currentIndex <= 0 || !activeCanvas || !currentHistory[currentIndex - 1]) {
       console.log('Undo: Cannot undo', { currentIndex, historyLength: currentHistory.length });
       return;
     }
-    
+
     isHistoryActionRef.current = true;
     const newIndex = currentIndex - 1;
     const stateToLoad = currentHistory[newIndex];
-    
+
     console.log('Undo: Loading state', { newIndex, historyLength: currentHistory.length });
-    
+
     try {
       activeCanvas.loadFromJSON(JSON.parse(stateToLoad)).then(() => {
         // Restore lock state after loading from history
@@ -1496,18 +1368,18 @@ export function AdvancedTemplateDesigner({ editTemplate, onBack, projectId, proj
   const handleRedo = useCallback(() => {
     const currentIndex = historyIndexRef.current;
     const currentHistory = historyRef.current;
-    
+
     if (currentIndex >= currentHistory.length - 1 || !activeCanvas || !currentHistory[currentIndex + 1]) {
       console.log('Redo: Cannot redo', { currentIndex, historyLength: currentHistory.length });
       return;
     }
-    
+
     isHistoryActionRef.current = true;
     const newIndex = currentIndex + 1;
     const stateToLoad = currentHistory[newIndex];
-    
+
     console.log('Redo: Loading state', { newIndex, historyLength: currentHistory.length });
-    
+
     try {
       activeCanvas.loadFromJSON(JSON.parse(stateToLoad)).then(() => {
         // Restore lock state after loading from history
@@ -1532,45 +1404,48 @@ export function AdvancedTemplateDesigner({ editTemplate, onBack, projectId, proj
    * @param {('in'|'out')} direction - Zoom direction
    */
   const handleZoom = useCallback((direction: 'in' | 'out') => {
-    const newZoom = direction === 'in' 
-      ? Math.min(zoom * 1.2, 3) 
+    const newZoom = direction === 'in'
+      ? Math.min(zoom * 1.2, 3)
       : Math.max(zoom / 1.2, 0.25);
     setZoom(newZoom);
-    
-    // Ensure background objects are properly constrained after zoom change
+  }, [zoom]);
+
+  // Zoom and resize canvas when zoom state changes
+  useEffect(() => {
     if (activeCanvas) {
-      const bgImage = activeCanvas.getObjects().find((obj: any) => obj.data?.isBackground);
-      const bgGradient = activeCanvas.getObjects().find((obj: any) => obj.data?.isGradientBackground);
-      
       const canvasWidth = widthMm * mmToPixels;
       const canvasHeight = heightMm * mmToPixels;
-      
-      // Re-constrain background image if it exists
-      if (bgImage) {
-        bgImage.set({
-          left: 0,
-          top: 0,
-          width: canvasWidth,
-          height: canvasHeight,
-        });
-        if (bgImage.width && bgImage.height) {
-          const scaleX = canvasWidth / bgImage.width;
-          const scaleY = canvasHeight / bgImage.height;
-          bgImage.scaleX = scaleX;
-          bgImage.scaleY = scaleY;
-        }
+
+      // Use setZoom + viewport reset to keep 0,0 at top-left
+      activeCanvas.setZoom(zoom);
+      const vpt = activeCanvas.viewportTransform;
+      if (vpt) {
+        vpt[4] = 0;
+        vpt[5] = 0;
       }
-      
-      // Re-constrain gradient background if it exists
+
+      // Resize gradient background if it exists
+      const bgGradient = activeCanvas.getObjects().find((obj: any) => obj.data?.isGradientBackground);
       if (bgGradient) {
         bgGradient.set({
-          left: 0,
-          top: 0,
           width: canvasWidth,
           height: canvasHeight,
         });
       }
-      
+
+      // Ensure background image covers the entire canvas after zoom/resize
+      if (activeCanvas.backgroundImage) {
+        const img = activeCanvas.backgroundImage;
+        img.set({
+          left: 0,
+          top: 0,
+          originX: 'left',
+          originY: 'top',
+          scaleX: canvasWidth / (img.width || 1),
+          scaleY: canvasHeight / (img.height || 1),
+        });
+      }
+
       activeCanvas.requestRenderAll();
     }
   }, [zoom, activeCanvas, widthMm, heightMm]);
@@ -1584,11 +1459,11 @@ export function AdvancedTemplateDesigner({ editTemplate, onBack, projectId, proj
     if (!activeCanvas) return;
 
     let shape: any;
-    const canvasWidth = (widthMm * mmToPixels) / zoom;
-    const canvasHeight = (heightMm * mmToPixels) / zoom;
+    const canvasWidth = widthMm * mmToPixels;
+    const canvasHeight = heightMm * mmToPixels;
     const centerX = canvasWidth / 2;
     const centerY = canvasHeight / 2;
-    
+
     // Calculate max size to fit within template
     const maxWidth = Math.min(100, canvasWidth * 0.4);
     const maxHeight = Math.min(60, canvasHeight * 0.4);
@@ -1720,6 +1595,33 @@ export function AdvancedTemplateDesigner({ editTemplate, onBack, projectId, proj
   }, [activeCanvas, widthMm, heightMm, zoom]);
 
   /**
+   * Add VDP Text Tool container to canvas
+   * @param {string} text - Initial text
+   */
+  const addVDPText = useCallback((text: string) => {
+    if (!activeCanvas) return;
+
+    const canvasWidth = widthMm * mmToPixels;
+    const canvasHeight = heightMm * mmToPixels;
+
+    const vdpText = new VDPText(text, VDPFunctionType.AUTOSIZE, {
+      left: canvasWidth / 2,
+      top: canvasHeight / 2,
+      width: 150,
+      height: 50,
+      fontSize: 20,
+      fontFamily: lastTextSettingsRef.current.fontFamily,
+      fill: lastTextSettingsRef.current.fill,
+    });
+
+    activeCanvas.add(vdpText);
+    activeCanvas.setActiveObject(vdpText);
+    activeCanvas.requestRenderAll();
+    setActiveTool('select');
+    saveToHistory();
+  }, [activeCanvas, widthMm, heightMm, saveToHistory]);
+
+  /**
    * Add text or variable field to canvas
    * Variable fields are stored as {{fieldName}} placeholders and replaced during data preview
    * Supports word wrapping and auto font sizing
@@ -1732,32 +1634,32 @@ export function AdvancedTemplateDesigner({ editTemplate, onBack, projectId, proj
    */
   const addVariableBox = useCallback((text: string) => {
     if (!activeCanvas) return;
-    
-    const canvasWidth = (widthMm * mmToPixels) / zoom;
-    const canvasHeight = (heightMm * mmToPixels) / zoom;
-    
+
+    const canvasWidth = widthMm * mmToPixels;
+    const canvasHeight = heightMm * mmToPixels;
+
     // Use last text settings for variables
     const lastSettings = lastTextSettingsRef.current;
     const fontSize = lastSettings.fontSize || 14;
     const fontFamily = lastSettings.fontFamily || 'Arial';
     const fill = lastSettings.fill || '#000000';
-    
+
     // For variable fields, always store the original placeholder text
     const originalText = text;
     const variableName = text.replace(/[{}]/g, '');
-    
+
     // Determine display text - ALWAYS use original field name, never preview data for boxes
     let displayText = originalText; // Always show original placeholder like {{firstName}}
-    
+
     // Calculate box dimensions
     const padding = 8;
     const boxWidth = Math.min(150, canvasWidth * 0.4);
     const boxHeight = Math.max(fontSize + padding * 2, 30);
-    
+
     // Position box within template bounds
     const boxLeft = Math.max(5, (canvasWidth - boxWidth) / 2);
     const boxTop = Math.max(5, (canvasHeight - boxHeight) / 2);
-    
+
     // If a variable box for this field already exists, resize it instead of creating a new one
     const existingBox = activeCanvas.getObjects().find((o: any) => o?.data?.type === 'variable-box' && o?.data?.field === variableName);
     if (existingBox) {
@@ -1836,7 +1738,7 @@ export function AdvancedTemplateDesigner({ editTemplate, onBack, projectId, proj
         textObject: null, // Will be set after textbox is created
       },
     });
-    
+
     // Create text inside the box
     const textbox = new Textbox(displayText, {
       left: boxLeft + padding,
@@ -1888,7 +1790,7 @@ export function AdvancedTemplateDesigner({ editTemplate, onBack, projectId, proj
       ...(boxRect as any).data,
       textObject: textbox,
     };
-    
+
     // Add custom styling for selection
     boxRect.set({
       borderColor: 'hsl(var(--primary))',
@@ -1898,7 +1800,7 @@ export function AdvancedTemplateDesigner({ editTemplate, onBack, projectId, proj
       cornerSize: 8,
       transparentCorners: false,
     });
-    
+
     // Set control visibility for box
     boxRect.setControlsVisibility({
       tl: true,
@@ -1911,14 +1813,14 @@ export function AdvancedTemplateDesigner({ editTemplate, onBack, projectId, proj
       mb: true,
       mtr: true,
     });
-    
+
     // Add both to canvas
     activeCanvas.add(boxRect);
     activeCanvas.add(textbox);
-    
+
     // Store original font size for reference
     const originalFontSize = fontSize;
-    
+
     // Helper function to update text position and size based on box
     const updateTextInBox = () => {
       const currentPadding = (boxRect as any).data?.padding || padding;
@@ -1926,7 +1828,7 @@ export function AdvancedTemplateDesigner({ editTemplate, onBack, projectId, proj
       const currentHeight = (boxRect.height || boxHeight) * (boxRect.scaleY || 1);
       const textWidth = Math.max(currentWidth - currentPadding * 2, 20);
       const textHeight = Math.max(currentHeight - currentPadding * 2, originalFontSize);
-      
+
       textbox.set({
         left: (boxRect.left || 0) + currentPadding,
         top: (boxRect.top || 0) + currentPadding,
@@ -1934,7 +1836,7 @@ export function AdvancedTemplateDesigner({ editTemplate, onBack, projectId, proj
         height: textHeight,
         breakWords: true, // Ensure word wrapping
       });
-      
+
       // Update clipping path to ensure text doesn't overflow
       if ((textbox as any).clipPath) {
         (textbox as any).clipPath.set({
@@ -1943,63 +1845,10 @@ export function AdvancedTemplateDesigner({ editTemplate, onBack, projectId, proj
         });
       }
     };
-    
-    // When box is moved, move text with it
-    boxRect.on('moving', () => {
-      updateTextInBox();
-      activeCanvas.requestRenderAll();
-    });
-    
-    // When box is being scaled, adjust text dimensions in real-time
-    boxRect.on('scaling', () => {
-      updateTextInBox();
-      activeCanvas.requestRenderAll();
-    });
-    
-    // When box scaling is complete, normalize dimensions and update text
-    (boxRect as any).on('modified', () => {
-      const scaleX = boxRect.scaleX || 1;
-      const scaleY = boxRect.scaleY || 1;
-      
-      // Calculate new actual dimensions
-      const newWidth = (boxRect.width || boxWidth) * scaleX;
-      const newHeight = (boxRect.height || boxHeight) * scaleY;
-      
-      // Update box with actual dimensions and reset scale
-      boxRect.set({
-        width: newWidth,
-        height: newHeight,
-        scaleX: 1,
-        scaleY: 1,
-      });
-      
-      // Update stored dimensions in data
-      (boxRect as any).set('data', {
-        ...(boxRect as any).data,
-        boxWidth: newWidth,
-        boxHeight: newHeight,
-      });
-      
-      // Update text to fit new box dimensions
-      updateTextInBox();
-      
-      activeCanvas.requestRenderAll();
-    });
-    
-    // When box is modified (moved, scaled, etc.), save to history
-    (boxRect as any).on('modified', () => {
-      // Ensure text stays within box after any modification
-      updateTextInBox();
-      activeCanvas.requestRenderAll();
-      saveToHistory();
-    });
-    
-    // When text is changed, ensure it stays within box bounds
-    textbox.on('changed', () => {
-      updateTextInBox();
-      activeCanvas.requestRenderAll();
-    });
-    
+
+    // Event listeners are now handled globally in handleObjectMoving, handleObjectScaling, etc.
+    // to ensure behavior persists even after save/load (JSON serialization).
+
     activeCanvas.setActiveObject(boxRect);
     activeCanvas.requestRenderAll();
     setActiveTool('select');
@@ -2011,22 +1860,27 @@ export function AdvancedTemplateDesigner({ editTemplate, onBack, projectId, proj
       addVariableBox(text);
       return;
     }
-    
+
+    if (arguments[3] === true) { // isVDP flag
+      addVDPText(text);
+      return;
+    }
+
     if (!activeCanvas) return;
-    
+
     const canvasWidth = (widthMm * mmToPixels) / zoom;
     const canvasHeight = (heightMm * mmToPixels) / zoom;
-    
+
     // Calculate text width that fits within template
     const maxTextWidth = Math.min(150, canvasWidth * 0.8);
-    
+
     // Use last text settings for variables, custom settings for headings
     const lastSettings = lastTextSettingsRef.current;
     let fontSize = lastSettings.fontSize;
     let fontFamily = lastSettings.fontFamily;
     let fontWeight: string | number = 'normal';
     let fill = lastSettings.fill;
-    
+
     if (!isVariable) {
       if (text === 'Heading') {
         fontSize = Math.min(32, canvasHeight * 0.15);
@@ -2038,7 +1892,7 @@ export function AdvancedTemplateDesigner({ editTemplate, onBack, projectId, proj
         fontSize = Math.min(16, canvasHeight * 0.08);
       }
     }
-    
+
     // Position text within template bounds
     const textLeft = Math.max(5, (canvasWidth - maxTextWidth) / 2);
     const textTop = Math.max(5, (canvasHeight - fontSize) / 2);
@@ -2046,7 +1900,7 @@ export function AdvancedTemplateDesigner({ editTemplate, onBack, projectId, proj
     // For variable fields, always store the original placeholder text
     // This ensures the placeholder is preserved even when preview mode is active
     const originalText = text;
-    
+
     // Determine display text - if this is a variable and we have preview data, apply it
     // This works both in preview mode AND when project client data is auto-loaded
     let displayText = text;
@@ -2085,7 +1939,7 @@ export function AdvancedTemplateDesigner({ editTemplate, onBack, projectId, proj
         originalFontSize: fontSize,
       },
     });
-    
+
     // Add custom styling for selection
     textbox.set({
       borderColor: 'hsl(var(--primary))',
@@ -2095,7 +1949,7 @@ export function AdvancedTemplateDesigner({ editTemplate, onBack, projectId, proj
       cornerSize: 8,
       transparentCorners: false,
     });
-    
+
     // Set control visibility - allow vertical resize too (top/bottom middle handles)
     // Width affects wrapping; height lets users control box bounds for multi-line text.
     textbox.setControlsVisibility({
@@ -2109,7 +1963,7 @@ export function AdvancedTemplateDesigner({ editTemplate, onBack, projectId, proj
       mb: true,
       mtr: true,
     });
-    
+
     activeCanvas.add(textbox);
     activeCanvas.setActiveObject(textbox);
     activeCanvas.requestRenderAll();
@@ -2125,17 +1979,17 @@ export function AdvancedTemplateDesigner({ editTemplate, onBack, projectId, proj
       FabricImage.fromURL(imgUrl, { crossOrigin: 'anonymous' }).then((img) => {
         const maxWidth = (widthMm * mmToPixels) * 0.5;
         const maxHeight = (heightMm * mmToPixels) * 0.5;
-        
+
         if (img.width && img.height) {
           const scale = Math.min(maxWidth / img.width, maxHeight / img.height);
           img.scale(scale);
         }
-        
+
         img.set({
           left: 50,
           top: 50,
         });
-        
+
         activeCanvas.add(img);
         activeCanvas.setActiveObject(img);
         activeCanvas.requestRenderAll();
@@ -2155,7 +2009,7 @@ export function AdvancedTemplateDesigner({ editTemplate, onBack, projectId, proj
     const canvasHeight = (heightMm * mmToPixels) / zoom;
     const centerX = canvasWidth / 2;
     const centerY = canvasHeight / 2;
-    
+
     // Calculate placeholder size that fits within template
     const maxPhotoWidth = Math.min(80, canvasWidth * 0.35);
     const maxPhotoHeight = Math.min(100, canvasHeight * 0.45);
@@ -2166,7 +2020,7 @@ export function AdvancedTemplateDesigner({ editTemplate, onBack, projectId, proj
     if (type === 'photo') {
       const width = maxPhotoWidth;
       const height = maxPhotoHeight;
-      
+
       // Handle custom mask
       if (shape === 'custom' && customMaskUrl) {
         FabricImage.fromURL(customMaskUrl, { crossOrigin: 'anonymous' }).then((img) => {
@@ -2175,7 +2029,7 @@ export function AdvancedTemplateDesigner({ editTemplate, onBack, projectId, proj
             const scale = Math.min(maxSize / img.width, maxSize / img.height);
             img.scale(scale);
           }
-          
+
           img.set({
             left: Math.max(5, centerX - maxSize / 2),
             top: Math.max(5, centerY - maxSize / 2),
@@ -2184,7 +2038,7 @@ export function AdvancedTemplateDesigner({ editTemplate, onBack, projectId, proj
             strokeWidth: 2,
             strokeDashArray: [5, 5],
           });
-          
+
           activeCanvas.add(img);
           activeCanvas.setActiveObject(img);
           activeCanvas.requestRenderAll();
@@ -2196,7 +2050,7 @@ export function AdvancedTemplateDesigner({ editTemplate, onBack, projectId, proj
         });
         return;
       }
-      
+
       switch (shape) {
         case 'circle':
           fabricObj = new Circle({
@@ -2319,7 +2173,7 @@ export function AdvancedTemplateDesigner({ editTemplate, onBack, projectId, proj
       const { generateBarcodeDataUrl } = await import('@/lib/codeGenerators');
       const barcodeData = '{{barcode}}';
       const placeholderData = 'ID12345';
-      
+
       try {
         const dataUrl = await generateBarcodeDataUrl(placeholderData, {
           format: 'CODE128',
@@ -2327,20 +2181,20 @@ export function AdvancedTemplateDesigner({ editTemplate, onBack, projectId, proj
           height: 50,
           displayValue: true,
         });
-        
+
         FabricImage.fromURL(dataUrl, { crossOrigin: 'anonymous' }).then((img) => {
           const maxWidth = Math.min(150, canvasWidth * 0.6);
           if (img.width && img.height) {
             const scale = maxWidth / img.width;
             img.scale(scale);
           }
-          
+
           img.set({
             left: Math.max(5, centerX - (img.width! * (img.scaleX || 1)) / 2),
             top: Math.max(5, centerY - (img.height! * (img.scaleY || 1)) / 2),
-            data: { 
-              type: 'variable', 
-              field: 'barcode', 
+            data: {
+              type: 'variable',
+              field: 'barcode',
               isBarcode: true,
               barcodeFormat: 'CODE128',
               barcodeWidth: 2,
@@ -2349,7 +2203,7 @@ export function AdvancedTemplateDesigner({ editTemplate, onBack, projectId, proj
               dataField: barcodeData,
             },
           });
-          
+
           activeCanvas.add(img);
           activeCanvas.setActiveObject(img);
           activeCanvas.requestRenderAll();
@@ -2368,26 +2222,26 @@ export function AdvancedTemplateDesigner({ editTemplate, onBack, projectId, proj
       const { generateQRCodeDataUrl } = await import('@/lib/codeGenerators');
       const qrData = '{{qr_code}}';
       const placeholderData = 'https://example.com';
-      
+
       try {
         const dataUrl = await generateQRCodeDataUrl(placeholderData, {
           width: 200,
           color: { dark: '#000000', light: '#ffffff' },
         });
-        
+
         FabricImage.fromURL(dataUrl, { crossOrigin: 'anonymous' }).then((img) => {
           const maxSize = Math.min(80, canvasWidth * 0.3, canvasHeight * 0.4);
           if (img.width && img.height) {
             const scale = maxSize / Math.max(img.width, img.height);
             img.scale(scale);
           }
-          
+
           img.set({
             left: Math.max(5, centerX - (img.width! * (img.scaleX || 1)) / 2),
             top: Math.max(5, centerY - (img.height! * (img.scaleY || 1)) / 2),
-            data: { 
-              type: 'variable', 
-              field: 'qr_code', 
+            data: {
+              type: 'variable',
+              field: 'qr_code',
               isQR: true,
               qrSize: 200,
               qrDarkColor: '#000000',
@@ -2395,7 +2249,7 @@ export function AdvancedTemplateDesigner({ editTemplate, onBack, projectId, proj
               dataField: qrData,
             },
           });
-          
+
           activeCanvas.add(img);
           activeCanvas.setActiveObject(img);
           activeCanvas.requestRenderAll();
@@ -2447,7 +2301,7 @@ export function AdvancedTemplateDesigner({ editTemplate, onBack, projectId, proj
         toast.success(`Font "${fontName}" loaded successfully`);
 
         // Revoke object URL after a short delay to allow browser to use it
-        setTimeout(() => { try { URL.revokeObjectURL(url); } catch (e) {} }, 5000);
+        setTimeout(() => { try { URL.revokeObjectURL(url); } catch (e) { } }, 5000);
       };
       reader.readAsArrayBuffer(file);
     } catch (error) {
@@ -2471,23 +2325,23 @@ export function AdvancedTemplateDesigner({ editTemplate, onBack, projectId, proj
   // Add custom shape to canvas
   const addCustomShapeToCanvas = useCallback((shapeUrl: string, shapeName: string) => {
     if (!activeCanvas) return;
-    
+
     const centerX = (widthMm * mmToPixels) / 2 / zoom;
     const centerY = (heightMm * mmToPixels) / 2 / zoom;
-    
+
     FabricImage.fromURL(shapeUrl, { crossOrigin: 'anonymous' }).then((img) => {
       const maxSize = 100;
       if (img.width && img.height) {
         const scale = Math.min(maxSize / img.width, maxSize / img.height);
         img.scale(scale);
       }
-      
+
       img.set({
         left: centerX - 50,
         top: centerY - 50,
         data: { type: 'customShape', name: shapeName },
       });
-      
+
       activeCanvas.add(img);
       activeCanvas.setActiveObject(img);
       activeCanvas.requestRenderAll();
@@ -2501,10 +2355,10 @@ export function AdvancedTemplateDesigner({ editTemplate, onBack, projectId, proj
   // Add icon to canvas
   const addIconToCanvas = useCallback((iconName: string, iconUrl: string) => {
     if (!activeCanvas) return;
-    
+
     const centerX = (widthMm * mmToPixels) / 2 / zoom;
     const centerY = (heightMm * mmToPixels) / 2 / zoom;
-    
+
     const addImageObject = (img: any) => {
       const maxSize = 50; // Icons are typically smaller
       if (img.width && img.height) {
@@ -2535,8 +2389,8 @@ export function AdvancedTemplateDesigner({ editTemplate, onBack, projectId, proj
         FabricImage.fromURL(objectUrl, { crossOrigin: 'anonymous' }).then((img) => {
           addImageObject(img);
           // Revoke after slight delay to ensure image used by canvas
-          setTimeout(() => { try { URL.revokeObjectURL(objectUrl); } catch (e) {} }, 2000);
-        }).catch(() => {
+          setTimeout(() => { try { URL.revokeObjectURL(objectUrl); } catch (e) { } }, 2000);
+        }).catch((e) => {
           toast.error('Failed to load icon');
         });
       } catch (err) {
@@ -2548,21 +2402,21 @@ export function AdvancedTemplateDesigner({ editTemplate, onBack, projectId, proj
   // Change photo placeholder shape
   const changePhotoPlaceholderShape = useCallback((newShape: PhotoShape, customMaskUrl?: string) => {
     if (!selectedObject || !activeCanvas) return;
-    
+
     // Check if selected object is a photo placeholder
     const objData = selectedObject.data;
     if (!objData?.isPhoto) return;
-    
+
     // Get current position and size
     const bounds = selectedObject.getBoundingRect();
     const left = selectedObject.left || 0;
     const top = selectedObject.top || 0;
     const currentWidth = bounds.width / (activeCanvas.getZoom() || 1);
     const currentHeight = bounds.height / (activeCanvas.getZoom() || 1);
-    
+
     // Remove old object
     activeCanvas.remove(selectedObject);
-    
+
     // Handle custom mask
     if (newShape === 'custom' && customMaskUrl) {
       FabricImage.fromURL(customMaskUrl, { crossOrigin: 'anonymous' }).then((img) => {
@@ -2570,7 +2424,7 @@ export function AdvancedTemplateDesigner({ editTemplate, onBack, projectId, proj
           const scale = Math.min(currentWidth / img.width, currentHeight / img.height);
           img.scale(scale);
         }
-        
+
         img.set({
           left,
           top,
@@ -2579,7 +2433,7 @@ export function AdvancedTemplateDesigner({ editTemplate, onBack, projectId, proj
           strokeWidth: 2,
           strokeDashArray: [5, 5],
         });
-        
+
         activeCanvas.add(img);
         activeCanvas.setActiveObject(img);
         activeCanvas.requestRenderAll();
@@ -2595,10 +2449,10 @@ export function AdvancedTemplateDesigner({ editTemplate, onBack, projectId, proj
       });
       return;
     }
-    
+
     // Create new object with same position but new shape
     let newObj: any;
-    
+
     switch (newShape) {
       case 'circle':
         newObj = new Circle({
@@ -2707,7 +2561,7 @@ export function AdvancedTemplateDesigner({ editTemplate, onBack, projectId, proj
         });
         break;
     }
-    
+
     newObj.set('data', { type: 'variable', field: 'photo', isPhoto: true, shape: newShape });
     activeCanvas.add(newObj);
     activeCanvas.setActiveObject(newObj);
@@ -2721,6 +2575,91 @@ export function AdvancedTemplateDesigner({ editTemplate, onBack, projectId, proj
    * Removes all active objects and clears selection
    * Re-renders canvas after deletion
    * @returns {void}
+   */
+  /**
+   * Applies a shape mask (clipPath) to the selected object
+   * @param {string} shape - Shape type (none, rect, circle, star)
+   */
+  const handleApplyMask = useCallback((shape: string) => {
+    if (!activeCanvas || !selectedObject) return;
+
+    if (shape === 'none') {
+      selectedObject.set('clipPath', undefined);
+      activeCanvas.requestRenderAll();
+      saveToHistory();
+      return;
+    }
+
+    // Get unscaled dimensions (clipPath scales with object)
+    // Actually clipPath is applied to the object.
+    // If we want the clipPath to match the object's visual bounds:
+    // With Fabric v6, clipPath is automatically transformed with the object if absolutePositioned is false (default).
+    // We should create the path relative to the object center (0,0).
+
+    // We use the object's width/height (unscaled) because clipPath scales with it?
+    // No, clipPath property is an object.
+    // If we want it to cover the object, we use object.width/height.
+
+    const width = selectedObject.width;
+    const height = selectedObject.height;
+    const minDim = Math.min(width, height);
+
+    let clipPath;
+
+    switch (shape) {
+      case 'circle':
+        clipPath = new Circle({
+          radius: minDim / 2,
+          originX: 'center',
+          originY: 'center',
+        });
+        break;
+      case 'rect':
+        clipPath = new Rect({
+          width: width,
+          height: height,
+          originX: 'center',
+          originY: 'center',
+        });
+        break;
+      case 'star':
+        // Generate star points relative to center
+        // Basic 5-point star
+        const outerRadius = minDim / 2;
+        const innerRadius = minDim / 4;
+        const points = [];
+        for (let i = 0; i < 5; i++) {
+          const angle = (i * 4 * Math.PI) / 10 - Math.PI / 2;
+          points.push({
+            x: Math.cos(angle) * outerRadius,
+            y: Math.sin(angle) * outerRadius
+          });
+          const angleInner = ((i * 4 + 2) * Math.PI) / 10 - Math.PI / 2;
+          points.push({
+            x: Math.cos(angleInner) * innerRadius,
+            y: Math.sin(angleInner) * innerRadius
+          });
+        }
+        clipPath = new Polygon(points, {
+          originX: 'center',
+          originY: 'center',
+        });
+        break;
+      case 'heart':
+        // Simplified heart path if needed, or omit
+        break;
+    }
+
+    if (clipPath) {
+      selectedObject.set('clipPath', clipPath);
+      activeCanvas.requestRenderAll();
+      saveToHistory();
+      toast.success(`Applied ${shape} mask`);
+    }
+  }, [activeCanvas, selectedObject, saveToHistory]);
+
+  /**
+   * Deletes the selected object(s) from the canvas
    */
   const handleDelete = useCallback(() => {
     if (!activeCanvas) return;
@@ -2786,25 +2725,28 @@ export function AdvancedTemplateDesigner({ editTemplate, onBack, projectId, proj
    */
   const handleBackgroundGradientChange = useCallback((gradientConfig: any) => {
     if (!activeCanvas) return;
-    
+
     try {
       const canvasWidth = widthMm * mmToPixels;
       const canvasHeight = heightMm * mmToPixels;
-      
-      // Remove any existing gradient background rect
+
+      // Remove any existing background (gradient or image)
       const existingGradientBg = activeCanvas.getObjects().find((obj: any) => obj.data?.isGradientBackground);
       if (existingGradientBg) {
         activeCanvas.remove(existingGradientBg);
       }
-      
+      activeCanvas.backgroundImage = null;
+      activeCanvas.renderAll();
+      setHasBackgroundImage(false);
+
       const fabricGradientConfig = gradientConfigToFabric(gradientConfig, canvasWidth, canvasHeight);
-      
+
       // Create gradient with proper Fabric.js v6 API
       const colorStops = Object.entries(fabricGradientConfig.colorStops).map(([offset, color]) => ({
         offset: parseFloat(offset),
         color: color as string,
       }));
-      
+
       let gradient;
       if (fabricGradientConfig.type === 'radial') {
         gradient = new Gradient<'radial'>({
@@ -2819,7 +2761,7 @@ export function AdvancedTemplateDesigner({ editTemplate, onBack, projectId, proj
           colorStops,
         });
       }
-      
+
       // Create a full-canvas rect with gradient fill (canvas.backgroundColor doesn't support gradients)
       const gradientRect = new Rect({
         left: 0,
@@ -2837,17 +2779,18 @@ export function AdvancedTemplateDesigner({ editTemplate, onBack, projectId, proj
         lockScalingX: true,
         lockScalingY: true,
         excludeFromExport: false,
-        absolutePositioned: true, // Ensure it stays at (0,0) regardless of zoom
+        originX: 'left',
+        originY: 'top',
         data: { isGradientBackground: true },
       });
-      
+
       activeCanvas.add(gradientRect);
       activeCanvas.sendObjectToBack(gradientRect);
-      
+
       // Clear solid background color since we're using gradient rect
       activeCanvas.backgroundColor = 'transparent';
       setBackgroundColor('transparent');
-      
+
       activeCanvas.requestRenderAll();
     } catch (error) {
       console.error('Error applying gradient:', error);
@@ -2869,48 +2812,28 @@ export function AdvancedTemplateDesigner({ editTemplate, onBack, projectId, proj
     reader.onload = (event) => {
       const imgUrl = event.target?.result as string;
       FabricImage.fromURL(imgUrl, { crossOrigin: 'anonymous' }).then((img) => {
+        if (!activeCanvas) return; // Re-check active canvas inside promise
+
         const canvasWidth = widthMm * mmToPixels;
         const canvasHeight = heightMm * mmToPixels;
-        
-        if (img.width && img.height) {
-          const scaleX = canvasWidth / img.width;
-          const scaleY = canvasHeight / img.height;
-          img.scaleX = scaleX;
-          img.scaleY = scaleY;
+
+        // Remove any existing gradient background
+        const existingGradientBg = activeCanvas.getObjects().find((obj: any) => obj.data?.isGradientBackground);
+        if (existingGradientBg) {
+          activeCanvas.remove(existingGradientBg);
         }
-        
-        img.set({
-          left: 0,
-          top: 0,
-          selectable: false,
-          evented: false,
-          hasControls: false,
-          hasBorders: false,
-          lockMovementX: true,
-          lockMovementY: true,
-          lockRotation: true,
-          lockScalingX: true,
-          lockScalingY: true,
-          excludeFromExport: false,
-          absolutePositioned: true, // Ensure it stays at (0,0) regardless of zoom
-          data: { isBackground: true },
-        });
-        
-        // Ensure image doesn't exceed canvas bounds
-        if (img.width! * img.scaleX! > canvasWidth) {
-          img.scaleX = canvasWidth / img.width!;
+
+        activeCanvas.backgroundImage = img;
+        if (activeCanvas.backgroundImage && activeCanvas.backgroundImage instanceof FabricImage) {
+          activeCanvas.backgroundImage.set({
+            originX: 'left',
+            originY: 'top',
+            scaleX: canvasWidth / (img.width || 1),
+            scaleY: canvasHeight / (img.height || 1),
+          });
         }
-        if (img.height! * img.scaleY! > canvasHeight) {
-          img.scaleY = canvasHeight / img.height!;
-        }
-        
-        // Remove existing background image
-        const existingBg = activeCanvas.getObjects().find((obj: any) => obj.data?.isBackground);
-        if (existingBg) activeCanvas.remove(existingBg);
-        
-        activeCanvas.add(img);
-        activeCanvas.sendObjectToBack(img);
-        activeCanvas.requestRenderAll();
+        activeCanvas.renderAll();
+
         setHasBackgroundImage(true);
         toast.success('Background image applied');
       }).catch((error: Error) => {
@@ -2923,12 +2846,9 @@ export function AdvancedTemplateDesigner({ editTemplate, onBack, projectId, proj
 
   const handleRemoveBackgroundImage = useCallback(() => {
     if (!activeCanvas) return;
-    const bgImage = activeCanvas.getObjects().find((obj: any) => obj.data?.isBackground);
-    if (bgImage) {
-      activeCanvas.remove(bgImage);
-      activeCanvas.requestRenderAll();
-      setHasBackgroundImage(false);
-    }
+    activeCanvas.backgroundImage = null;
+    activeCanvas.renderAll();
+    setHasBackgroundImage(false);
   }, [activeCanvas]);
 
   const handleRemoveBackgroundGradient = useCallback(() => {
@@ -3034,12 +2954,12 @@ export function AdvancedTemplateDesigner({ editTemplate, onBack, projectId, proj
   const bringForward = useCallback((obj?: any) => {
     const target = obj || selectedObject;
     if (!target || !activeCanvas) return;
-    
+
     // In Fabric v6, the object reference from the state should match the canvas object
     // Get the object's current index in the canvas
     const canvasObjects = activeCanvas.getObjects();
     const currentIndex = canvasObjects.indexOf(target);
-    
+
     if (currentIndex >= 0 && currentIndex < canvasObjects.length - 1) {
       // Move object forward by one position (increase z-index)
       // Use moveObjectTo which is the Fabric v6 method
@@ -3063,12 +2983,12 @@ export function AdvancedTemplateDesigner({ editTemplate, onBack, projectId, proj
   const sendBackward = useCallback((obj?: any) => {
     const target = obj || selectedObject;
     if (!target || !activeCanvas) return;
-    
+
     // In Fabric v6, the object reference from the state should match the canvas object
     // Get the object's current index in the canvas
     const canvasObjects = activeCanvas.getObjects();
     const currentIndex = canvasObjects.indexOf(target);
-    
+
     if (currentIndex > 0) {
       // Move object backward by one position (decrease z-index)
       // Use moveObjectTo which is the Fabric v6 method
@@ -3106,7 +3026,7 @@ export function AdvancedTemplateDesigner({ editTemplate, onBack, projectId, proj
     if (!activeCanvas) return;
     const isCurrentlyLocked = obj.lockMovementX === true && obj.lockMovementY === true;
     const newLockedState = !isCurrentlyLocked;
-    
+
     // Explicitly set lock properties to ensure they're saved
     obj.set({
       lockMovementX: newLockedState,
@@ -3120,18 +3040,18 @@ export function AdvancedTemplateDesigner({ editTemplate, onBack, projectId, proj
       hasControls: !newLockedState,
       hasBorders: !newLockedState,
     });
-    
+
     // Mark object as dirty to ensure properties are saved
     obj.dirty = true;
-    
+
     // Deselect if locking
     if (newLockedState && activeCanvas.getActiveObject() === obj) {
       activeCanvas.discardActiveObject();
     }
-    
+
     activeCanvas.requestRenderAll();
     updateObjectsList();
-    
+
     // Save to history to persist lock state
     saveToHistory();
   }, [activeCanvas, updateObjectsList, saveToHistory]);
@@ -3233,7 +3153,7 @@ export function AdvancedTemplateDesigner({ editTemplate, onBack, projectId, proj
     const variables: string[] = [];
     // match any content inside {{...}} non-greedily (matches same as replaceVariables)
     const variableRegex = /\{\{(.+?)\}\}/g;
-    
+
     activeCanvas.getObjects().forEach((obj: any) => {
       if (obj.type === 'textbox' && obj.text) {
         let match;
@@ -3273,30 +3193,30 @@ export function AdvancedTemplateDesigner({ editTemplate, onBack, projectId, proj
   const calculateAutoFontSize = useCallback((obj: any, text: string, maxWidth: number, maxHeight: number): number => {
     const baseFontSize = obj.fontSize || 16;
     const minFontSize = 10; // Minimum readable font size
-    
+
     // Create a temporary canvas to measure text
     const tempCanvas = document.createElement('canvas');
     const ctx = tempCanvas.getContext('2d');
     if (!ctx) return baseFontSize;
-    
+
     let fontSize = baseFontSize;
     const fontFamily = obj.fontFamily || 'Arial';
     const fontWeight = obj.fontWeight || 'normal';
     const lineHeight = obj.lineHeight || 1.2;
-    
+
     // Binary search for optimal font size
     let minSize = minFontSize;
     let maxSize = baseFontSize;
-    
+
     while (minSize <= maxSize) {
       const testSize = Math.floor((minSize + maxSize) / 2);
       ctx.font = `${fontWeight} ${testSize}px ${fontFamily}`;
-      
+
       // Measure text width
       const textWidth = ctx.measureText(text).width;
       // Estimate text height (for single line)
       const textHeight = testSize * lineHeight;
-      
+
       if (textWidth <= maxWidth && textHeight <= maxHeight) {
         fontSize = testSize;
         minSize = testSize + 1;
@@ -3304,7 +3224,7 @@ export function AdvancedTemplateDesigner({ editTemplate, onBack, projectId, proj
         maxSize = testSize - 1;
       }
     }
-    
+
     return Math.max(minFontSize, fontSize);
   }, []);
 
@@ -3319,23 +3239,23 @@ export function AdvancedTemplateDesigner({ editTemplate, onBack, projectId, proj
   const handlePreviewData = useCallback((data: Record<string, string>) => {
     if (!activeCanvas) return;
     setPreviewData(data);
-    
+
     // First, remove any existing preview images to replace them with new ones
     const existingPreviewImages = activeCanvas.getObjects().filter((o: any) => o?.data?.type === 'preview-photo');
     existingPreviewImages.forEach((img: any) => {
       const placeholderObj = img.data?.previewForObject;
       try {
         activeCanvas.remove(img);
-      } catch (e) {}
+      } catch (e) { }
       // Re-add the placeholder for re-processing
       if (placeholderObj) {
         try {
           activeCanvas.add(placeholderObj);
           if (placeholderObj.data) delete placeholderObj.data.previewImageAdded;
-        } catch (e) {}
+        } catch (e) { }
       }
     });
-    
+
     // Replace variable text with preview data
     activeCanvas.getObjects().forEach((obj: any) => {
       // Handle photo variable placeholders: load image preview and replace placeholder
@@ -3394,7 +3314,7 @@ export function AdvancedTemplateDesigner({ editTemplate, onBack, projectId, proj
                 activeCanvas.remove(obj);
                 activeCanvas.add(img);
                 obj.data.previewImageAdded = true;
-                setTimeout(() => { try { URL.revokeObjectURL(objectUrl); } catch (e) {} }, 2000);
+                setTimeout(() => { try { URL.revokeObjectURL(objectUrl); } catch (e) { } }, 2000);
                 activeCanvas.requestRenderAll();
               }).catch((e) => {
                 console.error('Failed to load preview image from blob URL', e);
@@ -3411,12 +3331,12 @@ export function AdvancedTemplateDesigner({ editTemplate, onBack, projectId, proj
         const fieldName = obj.data.field;
         if (data[fieldName]) {
           // Find the associated text object
-          const textObj = activeCanvas.getObjects().find((o: any) => 
-            o.data?.type === 'variable-text' && 
+          const textObj = activeCanvas.getObjects().find((o: any) =>
+            o.data?.type === 'variable-text' &&
             o.data?.field === fieldName &&
             o.data?.parentBox === obj
           );
-          
+
           if (textObj) {
             // Store original text if not already stored
             if (!(textObj as any).data) (textObj as any).data = {};
@@ -3426,20 +3346,20 @@ export function AdvancedTemplateDesigner({ editTemplate, onBack, projectId, proj
             if (!(textObj as any).data.originalFontSize) {
               (textObj as any).data.originalFontSize = (textObj as any).fontSize;
             }
-            
+
             let displayText = String(data[fieldName]);
-            
+
             // Apply text case transformation if set
             if ((textObj as any).data?.textCase === 'uppercase') {
               displayText = displayText.toUpperCase();
             } else if ((textObj as any).data?.textCase === 'lowercase') {
               displayText = displayText.toLowerCase();
             } else if ((textObj as any).data?.textCase === 'capitalize') {
-              displayText = displayText.split(' ').map((w: string) => 
+              displayText = displayText.split(' ').map((w: string) =>
                 w.charAt(0).toUpperCase() + w.slice(1).toLowerCase()
               ).join(' ');
             }
-            
+
             textObj.set('text', displayText);
             activeCanvas.requestRenderAll();
           }
@@ -3454,14 +3374,14 @@ export function AdvancedTemplateDesigner({ editTemplate, onBack, projectId, proj
         if (!obj.data.originalFontSize) {
           obj.data.originalFontSize = obj.fontSize;
         }
-        
+
         // Replace variables with data (escape keys so special chars don't break RegExp)
         let newText = obj.data.originalText;
         Object.entries(data).forEach(([key, value]) => {
           const escaped = escapeRegExp(key);
           newText = newText.replace(new RegExp(`\\{\\{${escaped}\\}\\}`, 'g'), String(value));
         });
-        
+
         // Apply auto font size if enabled
         if (obj.data?.autoFontSize) {
           const maxWidth = (obj.width || 100) * (obj.scaleX || 1);
@@ -3469,7 +3389,7 @@ export function AdvancedTemplateDesigner({ editTemplate, onBack, projectId, proj
           const optimalFontSize = calculateAutoFontSize(obj, newText, maxWidth, maxHeight);
           obj.set('fontSize', optimalFontSize);
         }
-        
+
         obj.set('text', newText);
       }
     });
@@ -3484,7 +3404,7 @@ export function AdvancedTemplateDesigner({ editTemplate, onBack, projectId, proj
    */
   const handleResetPreview = useCallback(() => {
     if (!activeCanvas) return;
-    
+
     /**
      * Restores original text and font sizes after preview mode
      * Undoes all variable replacements made during preview
@@ -3497,13 +3417,13 @@ export function AdvancedTemplateDesigner({ editTemplate, onBack, projectId, proj
       const placeholderObj = img.data?.previewForObject;
       try {
         activeCanvas.remove(img);
-      } catch (e) {}
+      } catch (e) { }
       // Re-add the placeholder at its original position
       if (placeholderObj) {
         try {
           activeCanvas.add(placeholderObj);
           if (placeholderObj.data) delete placeholderObj.data.previewImageAdded;
-        } catch (e) {}
+        } catch (e) { }
       }
     });
 
@@ -3512,12 +3432,12 @@ export function AdvancedTemplateDesigner({ editTemplate, onBack, projectId, proj
       // Handle variable boxes
       if (obj.data?.type === 'variable-box' && obj.data?.field) {
         // Find the associated text object
-        const textObj = activeCanvas.getObjects().find((o: any) => 
-          o.data?.type === 'variable-text' && 
+        const textObj = activeCanvas.getObjects().find((o: any) =>
+          o.data?.type === 'variable-text' &&
           o.data?.field === obj.data.field &&
           o.data?.parentBox === obj
         );
-        
+
         if (textObj && (textObj as any).data?.originalText) {
           textObj.set('text', (textObj as any).data.originalText);
           // Restore original font size if it was changed
@@ -3596,18 +3516,18 @@ export function AdvancedTemplateDesigner({ editTemplate, onBack, projectId, proj
   // Pan tool handlers - use refs to avoid re-registering event handlers
   useEffect(() => {
     if (!activeCanvas) return;
-    
+
     const handleMouseDown = (opt: any) => {
       if (activeTool === 'pan') {
         // When pan tool is active, ignore ALL objects (especially locked ones)
         // Force pan mode regardless of what's under the cursor
         opt.e.preventDefault();
         opt.e.stopPropagation();
-        
+
         // Disable canvas selection and deselect any object
         activeCanvas.selection = false;
         activeCanvas.discardActiveObject();
-        
+
         // Force all objects to be non-interactive
         if (opt.target) {
           const target = opt.target as any;
@@ -3617,7 +3537,7 @@ export function AdvancedTemplateDesigner({ editTemplate, onBack, projectId, proj
             opt.target = null;
           }
         }
-        
+
         isPanningRef.current = true;
         activeCanvas.defaultCursor = 'grabbing';
         activeCanvas.hoverCursor = 'grabbing';
@@ -3644,7 +3564,7 @@ export function AdvancedTemplateDesigner({ editTemplate, onBack, projectId, proj
         activeCanvas.hoverCursor = 'move';
       }
     };
-    
+
     const handleMouseMove = (opt: any) => {
       if (activeTool === 'pan' && isPanningRef.current && lastPanPositionRef.current) {
         // Prevent any object movement during pan - only pan the viewport
@@ -3652,7 +3572,7 @@ export function AdvancedTemplateDesigner({ editTemplate, onBack, projectId, proj
           // If somehow an object is targeted, ignore it and continue panning
           opt.target = null;
         }
-        
+
         // Only pan the canvas viewport, never move objects
         const vpt = activeCanvas.viewportTransform;
         if (vpt) {
@@ -3663,7 +3583,7 @@ export function AdvancedTemplateDesigner({ editTemplate, onBack, projectId, proj
         }
       }
     };
-    
+
     const handleMouseUp = () => {
       if (activeTool === 'pan') {
         isPanningRef.current = false;
@@ -3672,7 +3592,7 @@ export function AdvancedTemplateDesigner({ editTemplate, onBack, projectId, proj
         lastPanPositionRef.current = null;
       }
     };
-    
+
     // When pan tool is active, disable object selection entirely
     if (activeTool === 'pan') {
       activeCanvas.selection = false;
@@ -3715,11 +3635,11 @@ export function AdvancedTemplateDesigner({ editTemplate, onBack, projectId, proj
       });
       activeCanvas.requestRenderAll();
     }
-    
+
     activeCanvas.on('mouse:down', handleMouseDown);
     activeCanvas.on('mouse:move', handleMouseMove);
     activeCanvas.on('mouse:up', handleMouseUp);
-    
+
     return () => {
       activeCanvas.off('mouse:down', handleMouseDown);
       activeCanvas.off('mouse:move', handleMouseMove);
@@ -3752,21 +3672,21 @@ export function AdvancedTemplateDesigner({ editTemplate, onBack, projectId, proj
       // Get current canvas state for the current page
       // toObject() includes all properties by default, including lock states
       const currentDesignJson = fabricCanvas.toObject();
-      
-      // Build pages array with updated current page
+
+      // Build pages with updated current page
       const updatedPages = pages.map((page, index) => ({
         id: page.id,
         name: page.name,
         designJson: index === currentPageIndex ? currentDesignJson : page.designJson,
       }));
-      
+
       // Store first page as main design_json for backward compatibility
       // and all pages in a pages array within the design_json
       const designJson = {
         ...(updatedPages[0]?.designJson || currentDesignJson),
         __pages: updatedPages,
       };
-      
+
       // Ensure back canvas objects have explicit lock properties before saving
       // Coerce lock flags to booleans on back side as well
       if (hasBackSide && backFabricCanvas) {
@@ -3780,9 +3700,9 @@ export function AdvancedTemplateDesigner({ editTemplate, onBack, projectId, proj
           }
         });
       }
-      
-      const backDesignJson = hasBackSide && backFabricCanvas 
-        ? backFabricCanvas.toObject() 
+
+      const backDesignJson = hasBackSide && backFabricCanvas
+        ? backFabricCanvas.toObject()
         : null;
 
       // Use editTemplate's vendor_id for updates, or current user's vendor_id for new templates
@@ -3840,7 +3760,7 @@ export function AdvancedTemplateDesigner({ editTemplate, onBack, projectId, proj
   useEffect(() => {
     const container = containerRef.current;
     if (!container) return;
-    
+
     container.addEventListener('contextmenu', handleContextMenu);
     return () => {
       container.removeEventListener('contextmenu', handleContextMenu);
@@ -3884,13 +3804,13 @@ export function AdvancedTemplateDesigner({ editTemplate, onBack, projectId, proj
    */
   const handlePageSelect = useCallback((index: number) => {
     if (index === currentPageIndex || !fabricCanvas) return;
-    
+
     // Save current page state
     saveCurrentPageState();
-    
+
     // Switch to new page
     setCurrentPageIndex(index);
-    
+
     // Load new page content
     const newPage = pages[index];
     if (newPage.designJson) {
@@ -3906,7 +3826,7 @@ export function AdvancedTemplateDesigner({ editTemplate, onBack, projectId, proj
       fabricCanvas.requestRenderAll();
       updateObjectsList();
     }
-    
+
     setSelectedObject(null);
   }, [currentPageIndex, fabricCanvas, pages, saveCurrentPageState, updateObjectsList]);
 
@@ -3919,18 +3839,18 @@ export function AdvancedTemplateDesigner({ editTemplate, onBack, projectId, proj
    */
   const handleAddPage = useCallback(() => {
     if (!fabricCanvas) return;
-    
+
     // Save current page state first
     const currentDesignJson = fabricCanvas.toObject();
     const newPageIndex = pages.length; // This will be the index of the new page
-    
+
     // Create new page
     const newPage: PageData = {
       id: crypto.randomUUID(),
       name: `Page ${pages.length + 1}`,
       designJson: null,
     };
-    
+
     // Update pages: save current page design and add new page
     setPages(prev => {
       const updated = [...prev];
@@ -3942,16 +3862,16 @@ export function AdvancedTemplateDesigner({ editTemplate, onBack, projectId, proj
       // Add new page
       return [...updated, newPage];
     });
-    
+
     // Switch to new page index
     setCurrentPageIndex(newPageIndex);
-    
+
     // Clear canvas for new page
     safeClearCanvas(fabricCanvas);
     fabricCanvas.backgroundColor = '#ffffff';
     fabricCanvas.requestRenderAll();
     updateObjectsList();
-    
+
     setSelectedObject(null);
     toast.success('New page added');
   }, [fabricCanvas, pages.length, currentPageIndex, updateObjectsList]);
@@ -3967,18 +3887,18 @@ export function AdvancedTemplateDesigner({ editTemplate, onBack, projectId, proj
   const handleDuplicatePage = useCallback((index: number) => {
     // Save current page first
     saveCurrentPageState();
-    
+
     const sourcePage = pages[index];
     const duplicatedPage: PageData = {
       id: crypto.randomUUID(),
       name: `${sourcePage.name} (Copy)`,
       designJson: sourcePage.designJson ? JSON.parse(JSON.stringify(sourcePage.designJson)) : null,
     };
-    
+
     const newPages = [...pages];
     newPages.splice(index + 1, 0, duplicatedPage);
     setPages(newPages);
-    
+
     // Switch to duplicated page
     if (fabricCanvas && duplicatedPage.designJson) {
       fabricCanvas.loadFromJSON(duplicatedPage.designJson).then(() => {
@@ -3987,7 +3907,7 @@ export function AdvancedTemplateDesigner({ editTemplate, onBack, projectId, proj
         updateObjectsList();
       });
     }
-    
+
     setCurrentPageIndex(index + 1);
     toast.success('Page duplicated');
   }, [fabricCanvas, pages, saveCurrentPageState, updateObjectsList]);
@@ -4005,16 +3925,16 @@ export function AdvancedTemplateDesigner({ editTemplate, onBack, projectId, proj
       toast.error('Cannot delete the only page');
       return;
     }
-    
+
     const newPages = pages.filter((_, i) => i !== index);
     setPages(newPages);
-    
+
     // Adjust current page index if needed
     let newIndex = currentPageIndex;
     if (index <= currentPageIndex) {
       newIndex = Math.max(0, currentPageIndex - 1);
     }
-    
+
     // Load the new current page
     const newCurrentPage = newPages[newIndex];
     if (fabricCanvas) {
@@ -4031,7 +3951,7 @@ export function AdvancedTemplateDesigner({ editTemplate, onBack, projectId, proj
         updateObjectsList();
       }
     }
-    
+
     setCurrentPageIndex(newIndex);
     setSelectedObject(null);
     toast.success('Page deleted');
@@ -4156,7 +4076,7 @@ export function AdvancedTemplateDesigner({ editTemplate, onBack, projectId, proj
     if (container) {
       container.addEventListener('wheel', handleWheel, { passive: false });
     }
-    
+
     // Also prevent at document level when in designer
     const docWheelHandler = (e: WheelEvent) => {
       if ((e.ctrlKey || e.metaKey) && containerRef.current?.contains(e.target as Node)) {
@@ -4339,8 +4259,8 @@ export function AdvancedTemplateDesigner({ editTemplate, onBack, projectId, proj
       {/* Main Content */}
       <div className="flex flex-1 min-h-0 overflow-hidden">
         {/* Tool Sidebar */}
-        <DesignerToolsSidebar 
-          activeTab={activeSidebarTab} 
+        <DesignerToolsSidebar
+          activeTab={activeSidebarTab}
           onTabChange={setActiveSidebarTab}
           activeTool={activeTool === 'pan' ? 'pan' : activeTool === 'text' ? 'text' : 'select'}
           onToolChange={handleSidebarToolChange}
@@ -4360,33 +4280,33 @@ export function AdvancedTemplateDesigner({ editTemplate, onBack, projectId, proj
           <DesignerImagesPanel onAddImage={addImage} onAddPlaceholder={addPlaceholder} onAddCustomShape={handleAddCustomShape} onAddCustomFont={handleAddCustomFont} onUseCustomShape={addCustomShapeToCanvas} onChangePhotoShape={changePhotoPlaceholderShape} onUpdatePhotoBorder={() => { saveToHistory(); updateObjectsList(); }} customShapes={customShapes} libraryShapes={libraryShapes.map((s: any) => ({ name: s.name, url: s.shape_url }))} customFonts={customFonts} selectedObject={selectedObject} canvas={activeCanvas} onClose={() => setActiveSidebarTab(null)} />
         )}
         {activeSidebarTab === 'data' && (
-          <DesignerDataPreviewPanel 
-            onPreviewData={handlePreviewData} 
-            onResetPreview={handleResetPreview} 
-            isPreviewMode={isPreviewMode} 
-            onTogglePreviewMode={handleTogglePreviewMode} 
-            onClose={() => setActiveSidebarTab(null)} 
+          <DesignerDataPreviewPanel
+            onPreviewData={handlePreviewData}
+            onResetPreview={handleResetPreview}
+            isPreviewMode={isPreviewMode}
+            onTogglePreviewMode={handleTogglePreviewMode}
+            onClose={() => setActiveSidebarTab(null)}
             detectedVariables={detectedVariables}
             projectId={projectId}
             projectClient={projectClient}
           />
         )}
         {activeSidebarTab === 'library' && (
-          <DesignerLibraryPanel 
-            vendorId={vendorData?.id || null} 
-            onAddFont={(name, url) => { 
-              const loadFont = async () => { 
-                const fontFace = new FontFace(name, `url(${url})`); 
-                await fontFace.load(); 
-                document.fonts.add(fontFace); 
-                setCustomFonts(prev => [...prev, name]); 
+          <DesignerLibraryPanel
+            vendorId={vendorData?.id || null}
+            onAddFont={(name, url) => {
+              const loadFont = async () => {
+                const fontFace = new FontFace(name, `url(${url})`);
+                await fontFace.load();
+                document.fonts.add(fontFace);
+                setCustomFonts(prev => [...prev, name]);
                 toast.success(`Font "${name}" loaded`);
-              }; 
-              loadFont().catch(() => toast.error('Failed to load font')); 
-            }} 
-            onAddShape={(name, url) => { addCustomShapeToCanvas(url, name); }} 
+              };
+              loadFont().catch(() => toast.error('Failed to load font'));
+            }}
+            onAddShape={(name, url) => { addCustomShapeToCanvas(url, name); }}
             onAddIcon={(name, url) => { addIconToCanvas(name, url); }}
-            onClose={() => setActiveSidebarTab(null)} 
+            onClose={() => setActiveSidebarTab(null)}
           />
         )}
         {activeSidebarTab === 'batch' && (
@@ -4414,17 +4334,17 @@ export function AdvancedTemplateDesigner({ editTemplate, onBack, projectId, proj
           {/* Guide Controls */}
           <div className="flex items-center gap-4 px-3 py-1.5 bg-card/80 border-b text-xs">
             <label className="flex items-center gap-1.5 cursor-pointer select-none">
-              <Checkbox 
-                checked={showGuides} 
-                onCheckedChange={(checked) => setShowGuides(checked === true)} 
+              <Checkbox
+                checked={showGuides}
+                onCheckedChange={(checked) => setShowGuides(checked === true)}
                 className="h-3.5 w-3.5"
               />
               <span className="text-muted-foreground">Show Guides</span>
             </label>
             <label className="flex items-center gap-1.5 cursor-pointer select-none">
-              <Checkbox 
-                checked={showTopIndicator} 
-                onCheckedChange={(checked) => setShowTopIndicator(checked === true)} 
+              <Checkbox
+                checked={showTopIndicator}
+                onCheckedChange={(checked) => setShowTopIndicator(checked === true)}
                 className="h-3.5 w-3.5"
               />
               <span className="text-muted-foreground">Show "TOP" Indicator</span>
@@ -4438,16 +4358,16 @@ export function AdvancedTemplateDesigner({ editTemplate, onBack, projectId, proj
               <CanvasRuler orientation="horizontal" length={widthMm} zoom={zoom} />
             </div>
           </div>
-          
+
           <div className="flex flex-1 min-h-0 overflow-hidden">
             {/* Vertical Ruler */}
             <div className="flex-shrink-0 sticky left-0 z-10 bg-background border-r">
               <CanvasRuler orientation="vertical" length={heightMm} zoom={zoom} />
             </div>
-            
+
             {/* Canvas Container with Scrollbars */}
             <div className="flex-1 overflow-auto">
-              <div 
+              <div
                 ref={containerRef}
                 className="flex items-center justify-center p-12"
                 style={{
@@ -4477,7 +4397,7 @@ export function AdvancedTemplateDesigner({ editTemplate, onBack, projectId, proj
                 <div className="relative" style={{ padding: showGuides ? `${bleedMm * mmToPixels * zoom + 25}px` : '0' }}>
                   {/* Canvas Overlays */}
                   {showGuides && (
-                    <div 
+                    <div
                       className="absolute pointer-events-none"
                       style={{
                         top: bleedMm * mmToPixels * zoom + 25,
@@ -4493,8 +4413,12 @@ export function AdvancedTemplateDesigner({ editTemplate, onBack, projectId, proj
                         heightMm={heightMm}
                         bleedMm={bleedMm}
                         safeZoneMm={safeZoneMm}
+                        marginTopMm={marginTop}
                         mmToPixels={mmToPixels}
                         zoom={zoom}
+                        marginBottomMm={marginBottom}
+                        marginLeftMm={marginLeft}
+                        marginRightMm={marginRight}
                         showBleed={true}
                         showSafeZone={true}
                         showLabels={true}
@@ -4502,55 +4426,42 @@ export function AdvancedTemplateDesigner({ editTemplate, onBack, projectId, proj
                       />
                     </div>
                   )}
-                  
-                  {/* Main canvas container - use CSS transform for crisp zoom */}
-                  <div 
-                    className="relative shadow-2xl rounded-lg overflow-hidden border border-border"
-                    style={{
-                      width: widthMm * mmToPixels,
-                      height: heightMm * mmToPixels,
-                      transform: `scale(${zoom})`,
-                      transformOrigin: 'top left',
-                      willChange: 'transform',
-                      imageRendering: '-webkit-optimize-contrast',
-                      backfaceVisibility: 'hidden',
-                      perspective: '1000px',
-                      WebkitFontSmoothing: 'antialiased',
-                      MozOsxFontSmoothing: 'grayscale',
-                      isolation: 'isolate', // Create new stacking context to prevent rendering issues
-                      contain: 'layout style paint', // Optimize rendering and prevent overflow
-                    } as React.CSSProperties}
+
+                  {/* Main canvas container - size is now controlled by FabricCanvasComponent */}
+                  <div
+                    className="relative shadow-lg"
                   >
-                    <div style={{ 
-                      display: activeSide === 'front' ? 'block' : 'none',
-                      width: '100%',
-                      height: '100%',
-                      overflow: 'hidden',
-                    }}>
-                      <canvas ref={canvasRef} style={{ 
-                        display: 'block',
-                        width: '100%',
-                        height: '100%',
-                        imageRendering: '-webkit-optimize-contrast',
-                        backfaceVisibility: 'hidden',
-                      }} />
-                    </div>
-                    {hasBackSide && (
-                      <div style={{ 
-                        display: activeSide === 'back' ? 'block' : 'none',
-                        width: '100%',
-                        height: '100%',
-                        overflow: 'hidden',
-                      }}>
-                        <canvas ref={backCanvasRef} style={{ 
-                          display: 'block',
-                          width: '100%',
-                          height: '100%',
-                          imageRendering: '-webkit-optimize-contrast',
-                          backfaceVisibility: 'hidden',
-                        }} />
-                      </div>
+                    {activeSide === 'front' ? (
+                      <FabricCanvasComponent
+                        onReady={handleFrontCanvasReady}
+                        width={widthMm * mmToPixels * zoom}
+                        height={heightMm * mmToPixels * zoom}
+                      />
+                    ) : (
+                      <FabricCanvasComponent
+                        onReady={handleBackCanvasReady}
+                        width={widthMm * mmToPixels * zoom}
+                        height={heightMm * mmToPixels * zoom}
+                      />
                     )}
+                    <CanvasOverlays
+                      widthPx={widthMm * mmToPixels}
+                      heightPx={heightMm * mmToPixels}
+                      widthMm={widthMm}
+                      heightMm={heightMm}
+                      bleedMm={bleedMm}
+                      safeZoneMm={safeZoneMm}
+                      marginTopMm={marginTop}
+                      mmToPixels={mmToPixels}
+                      zoom={zoom}
+                      marginBottomMm={marginBottom}
+                      marginLeftMm={marginLeft}
+                      marginRightMm={marginRight}
+                      showBleed={showGuides}
+                      showSafeZone={showGuides}
+                      showLabels={showGuides}
+                      showTopIndicator={showTopIndicator}
+                    />
                   </div>
                 </div>
               </div>
@@ -4569,45 +4480,7 @@ export function AdvancedTemplateDesigner({ editTemplate, onBack, projectId, proj
             onZoomIn={() => handleZoom('in')}
             onZoomOut={() => handleZoom('out')}
             onZoomReset={() => setZoom(1)}
-            onZoomChange={(newZoom) => {
-              setZoom(newZoom);
-              // Ensure background objects are properly constrained after zoom change
-              if (activeCanvas) {
-                const bgImage = activeCanvas.getObjects().find((obj: any) => obj.data?.isBackground);
-                const bgGradient = activeCanvas.getObjects().find((obj: any) => obj.data?.isGradientBackground);
-                
-                const canvasWidth = widthMm * mmToPixels;
-                const canvasHeight = heightMm * mmToPixels;
-                
-                // Re-constrain background image if it exists
-                if (bgImage) {
-                  bgImage.set({
-                    left: 0,
-                    top: 0,
-                    width: canvasWidth,
-                    height: canvasHeight,
-                  });
-                  if (bgImage.width && bgImage.height) {
-                    const scaleX = canvasWidth / bgImage.width;
-                    const scaleY = canvasHeight / bgImage.height;
-                    bgImage.scaleX = scaleX;
-                    bgImage.scaleY = scaleY;
-                  }
-                }
-                
-                // Re-constrain gradient background if it exists
-                if (bgGradient) {
-                  bgGradient.set({
-                    left: 0,
-                    top: 0,
-                    width: canvasWidth,
-                    height: canvasHeight,
-                  });
-                }
-                
-                activeCanvas.requestRenderAll();
-              }
-            }}
+            onZoomChange={setZoom}
             showGrid={showGrid}
             onToggleGrid={() => setShowGrid(!showGrid)}
             isPreviewMode={isPreviewMode}
@@ -4624,8 +4497,8 @@ export function AdvancedTemplateDesigner({ editTemplate, onBack, projectId, proj
 
         {/* Right Panel - Properties, Layers, Templates, Gallery, FAQ, Help */}
         <div className="hidden md:flex flex-shrink-0 h-full sticky top-0 overflow-hidden">
-          <DesignerRightPanel 
-            selectedObject={selectedObject} 
+          <DesignerRightPanel
+            selectedObject={selectedObject}
             canvas={activeCanvas}
             objects={objects}
             onUpdate={() => {
@@ -4666,13 +4539,15 @@ export function AdvancedTemplateDesigner({ editTemplate, onBack, projectId, proj
             customFonts={customFonts}
             safeZoneMm={safeZoneMm}
             mmToPixels={mmToPixels}
+            onApplyMask={handleApplyMask}
+            projectId={projectId}
           />
         </div>
 
         {/* Mobile Right Panel */}
         <div className="md:hidden">
-          <DesignerRightPanel 
-            selectedObject={selectedObject} 
+          <DesignerRightPanel
+            selectedObject={selectedObject}
             canvas={activeCanvas}
             objects={objects}
             onUpdate={() => {
@@ -4713,6 +4588,8 @@ export function AdvancedTemplateDesigner({ editTemplate, onBack, projectId, proj
             customFonts={customFonts}
             safeZoneMm={safeZoneMm}
             mmToPixels={mmToPixels}
+            onApplyMask={handleApplyMask}
+            projectId={projectId}
           />
         </div>
       </div>

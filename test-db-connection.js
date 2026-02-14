@@ -14,7 +14,7 @@ dotenv.config();
 
 async function testConnection() {
   console.log('\n🔍 Testing Database Connection...\n');
-  
+
   const config = {
     host: process.env.DB_HOST || 'localhost',
     user: process.env.DB_USER || 'root',
@@ -86,7 +86,7 @@ async function testConnection() {
         [sampleId, 'Test User', 'test@example.com']
       );
       console.log('   ✅ Insert successful (sample data added)');
-      
+
       // Delete test data
       await connection.query('DELETE FROM profiles WHERE full_name = "Test User"');
       console.log('   ✅ Cleanup successful (test data removed)');

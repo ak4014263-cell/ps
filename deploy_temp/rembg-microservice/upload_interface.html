@@ -1,0 +1,643 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Photo Processor - Background Removal & Face Crop</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            padding: 20px;
+        }
+
+        .container {
+            background: white;
+            border-radius: 12px;
+            box-shadow: 0 20px 60px rgba(0, 0, 0, 0.3);
+            max-width: 500px;
+            width: 100%;
+            padding: 40px;
+        }
+
+        .header {
+            text-align: center;
+            margin-bottom: 30px;
+        }
+
+        .header h1 {
+            color: #333;
+            font-size: 28px;
+            margin-bottom: 10px;
+        }
+
+        .header p {
+            color: #666;
+            font-size: 14px;
+        }
+
+        .upload-section {
+            margin-bottom: 25px;
+        }
+
+        .upload-label {
+            display: block;
+            font-weight: 600;
+            color: #333;
+            margin-bottom: 10px;
+        }
+
+        .drop-zone {
+            border: 2px dashed #667eea;
+            border-radius: 8px;
+            padding: 30px;
+            text-align: center;
+            cursor: pointer;
+            background: #f8f9ff;
+            transition: all 0.3s ease;
+        }
+
+        .drop-zone:hover,
+        .drop-zone.dragover {
+            border-color: #764ba2;
+            background: #f0f0ff;
+            transform: scale(1.02);
+        }
+
+        .drop-zone-icon {
+            font-size: 32px;
+            margin-bottom: 10px;
+        }
+
+        .drop-zone-text {
+            color: #666;
+            font-size: 14px;
+        }
+
+        .drop-zone-highlight {
+            color: #667eea;
+            font-weight: 600;
+        }
+
+        #fileInput {
+            display: none;
+        }
+
+        .options-section {
+            margin-bottom: 25px;
+        }
+
+        .option-group {
+            display: flex;
+            align-items: center;
+            margin-bottom: 15px;
+            padding: 12px;
+            background: #f8f9ff;
+            border-radius: 6px;
+        }
+
+        .checkbox {
+            width: 20px;
+            height: 20px;
+            cursor: pointer;
+            margin-right: 12px;
+        }
+
+        .option-label {
+            flex: 1;
+            cursor: pointer;
+            color: #333;
+            font-weight: 500;
+        }
+
+        .model-select {
+            width: 100%;
+            padding: 10px;
+            border: 1px solid #ddd;
+            border-radius: 6px;
+            margin-top: 8px;
+            font-size: 14px;
+        }
+
+        .button-group {
+            display: flex;
+            gap: 10px;
+        }
+
+        .btn {
+            flex: 1;
+            padding: 12px 20px;
+            border: none;
+            border-radius: 6px;
+            font-size: 14px;
+            font-weight: 600;
+            cursor: pointer;
+            transition: all 0.3s ease;
+        }
+
+        .btn-primary {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+        }
+
+        .btn-primary:hover:not(:disabled) {
+            transform: translateY(-2px);
+            box-shadow: 0 10px 20px rgba(102, 126, 234, 0.3);
+        }
+
+        .btn-primary:disabled {
+            opacity: 0.5;
+            cursor: not-allowed;
+        }
+
+        .btn-secondary {
+            background: #f0f0f0;
+            color: #333;
+        }
+
+        .btn-secondary:hover {
+            background: #e0e0e0;
+        }
+
+        .status-section {
+            display: none;
+            margin-top: 25px;
+            padding: 20px;
+            background: #f8f9ff;
+            border-radius: 8px;
+            border-left: 4px solid #667eea;
+        }
+
+        .status-section.visible {
+            display: block;
+        }
+
+        .status-header {
+            font-weight: 600;
+            color: #333;
+            margin-bottom: 15px;
+        }
+
+        .job-id {
+            font-size: 12px;
+            color: #666;
+            word-break: break-all;
+            margin-bottom: 15px;
+            padding: 10px;
+            background: white;
+            border-radius: 4px;
+        }
+
+        .progress-container {
+            margin-bottom: 15px;
+        }
+
+        .progress-label {
+            font-size: 13px;
+            color: #666;
+            margin-bottom: 8px;
+            display: flex;
+            justify-content: space-between;
+        }
+
+        .progress-bar {
+            width: 100%;
+            height: 24px;
+            background: white;
+            border-radius: 4px;
+            overflow: hidden;
+        }
+
+        .progress-fill {
+            height: 100%;
+            background: linear-gradient(90deg, #667eea 0%, #764ba2 100%);
+            width: 0%;
+            transition: width 0.3s ease;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            color: white;
+            font-size: 11px;
+            font-weight: 600;
+        }
+
+        .status-badge {
+            display: inline-block;
+            padding: 4px 12px;
+            border-radius: 12px;
+            font-size: 12px;
+            font-weight: 600;
+        }
+
+        .badge-pending {
+            background: #fff3cd;
+            color: #856404;
+        }
+
+        .badge-processing {
+            background: #cfe2ff;
+            color: #084298;
+        }
+
+        .badge-completed {
+            background: #d1e7dd;
+            color: #0f5132;
+        }
+
+        .badge-failed {
+            background: #f8d7da;
+            color: #842029;
+        }
+
+        .download-section {
+            margin-top: 15px;
+            display: none;
+        }
+
+        .download-section.visible {
+            display: block;
+        }
+
+        .download-btn {
+            width: 100%;
+            padding: 12px;
+            background: #28a745;
+            color: white;
+            border: none;
+            border-radius: 6px;
+            font-weight: 600;
+            cursor: pointer;
+            margin-bottom: 8px;
+        }
+
+        .download-btn:hover {
+            background: #218838;
+        }
+
+        .message {
+            padding: 12px;
+            border-radius: 6px;
+            margin-bottom: 10px;
+            font-size: 13px;
+        }
+
+        .message.info {
+            background: #d1ecf1;
+            color: #0c5460;
+            border-left: 3px solid #0c5460;
+        }
+
+        .message.error {
+            background: #f8d7da;
+            color: #721c24;
+            border-left: 3px solid #721c24;
+        }
+
+        .message.success {
+            background: #d4edda;
+            color: #155724;
+            border-left: 3px solid #155724;
+        }
+
+        .file-list {
+            margin-top: 15px;
+            max-height: 150px;
+            overflow-y: auto;
+        }
+
+        .file-item {
+            padding: 8px;
+            background: white;
+            border-radius: 4px;
+            margin-bottom: 5px;
+            font-size: 12px;
+            color: #666;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+
+        .file-item-name {
+            flex: 1;
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+        }
+
+        .file-item-badge {
+            font-size: 10px;
+            background: #667eea;
+            color: white;
+            padding: 2px 6px;
+            border-radius: 3px;
+            margin-left: 8px;
+        }
+
+        @media (max-width: 600px) {
+            .container {
+                padding: 20px;
+            }
+
+            .header h1 {
+                font-size: 22px;
+            }
+
+            .drop-zone {
+                padding: 20px;
+            }
+
+            .button-group {
+                flex-direction: column;
+            }
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <h1>📸 Photo Processor</h1>
+            <p>Upload photos or zip file - automatic background removal & face crop</p>
+        </div>
+
+        <form id="uploadForm">
+            <!-- File Upload -->
+            <div class="upload-section">
+                <label class="upload-label">📁 Upload Photos</label>
+                <div class="drop-zone" id="dropZone">
+                    <div class="drop-zone-icon">📤</div>
+                    <div class="drop-zone-text">
+                        Drop photos or zip file here, or <span class="drop-zone-highlight">click to select</span>
+                    </div>
+                    <input type="file" id="fileInput" multiple accept=".jpg,.jpeg,.png,.bmp,.gif,.webp,.zip">
+                </div>
+                <div class="file-list" id="fileList"></div>
+            </div>
+
+            <!-- Processing Options -->
+            <div class="options-section">
+                <label class="upload-label">⚙️ Processing Options</label>
+                
+                <div class="option-group">
+                    <input type="checkbox" id="removeBg" class="checkbox" checked>
+                    <label for="removeBg" class="option-label">Remove Background</label>
+                </div>
+
+                <div class="option-group">
+                    <input type="checkbox" id="cropFace" class="checkbox" checked>
+                    <label for="cropFace" class="option-label">Crop Face</label>
+                </div>
+
+                <div>
+                    <label class="upload-label" style="margin-bottom: 8px;">Select Model</label>
+                    <select id="model" class="model-select">
+                        <option value="u2net">U2Net - Balanced (2-3s per image)</option>
+                        <option value="siluette">Siluette - Fast (0.5s per image)</option>
+                        <option value="isnet-general-use">ISNet - High Quality (1.5s per image)</option>
+                    </select>
+                </div>
+            </div>
+
+            <!-- Action Buttons -->
+            <div class="button-group">
+                <button type="submit" id="submitBtn" class="btn btn-primary" disabled>
+                    🚀 Process
+                </button>
+                <button type="button" id="clearBtn" class="btn btn-secondary">
+                    🔄 Clear
+                </button>
+            </div>
+        </form>
+
+        <!-- Status Section -->
+        <div class="status-section" id="statusSection">
+            <div class="status-header">Processing Status</div>
+            <div id="messages"></div>
+            
+            <div class="job-id">
+                <strong>Job ID:</strong> <span id="jobId"></span>
+            </div>
+
+            <div>
+                <div class="status-badge" id="statusBadge">pending</div>
+            </div>
+
+            <div class="progress-container" id="progressContainer" style="display: none;">
+                <div class="progress-label">
+                    <span>Progress</span>
+                    <span id="progressText">0/0</span>
+                </div>
+                <div class="progress-bar">
+                    <div class="progress-fill" id="progressFill"></div>
+                </div>
+            </div>
+
+            <div class="download-section" id="downloadSection">
+                <button type="button" class="download-btn" onclick="downloadResults('zip')">
+                    📥 Download as ZIP
+                </button>
+                <button type="button" class="download-btn" onclick="downloadResults('individual')">
+                    📥 Download First Image
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        const API_BASE = 'http://localhost:5000/api';
+        let selectedFiles = [];
+        let currentJobId = null;
+        let pollingInterval = null;
+
+        // Elements
+        const dropZone = document.getElementById('dropZone');
+        const fileInput = document.getElementById('fileInput');
+        const fileList = document.getElementById('fileList');
+        const uploadForm = document.getElementById('uploadForm');
+        const submitBtn = document.getElementById('submitBtn');
+        const clearBtn = document.getElementById('clearBtn');
+        const statusSection = document.getElementById('statusSection');
+        const messagesDiv = document.getElementById('messages');
+        const jobIdSpan = document.getElementById('jobId');
+        const statusBadge = document.getElementById('statusBadge');
+        const progressContainer = document.getElementById('progressContainer');
+        const progressFill = document.getElementById('progressFill');
+        const progressText = document.getElementById('progressText');
+        const downloadSection = document.getElementById('downloadSection');
+
+        // Drop zone events
+        dropZone.addEventListener('click', () => fileInput.click());
+        dropZone.addEventListener('dragover', (e) => {
+            e.preventDefault();
+            dropZone.classList.add('dragover');
+        });
+        dropZone.addEventListener('dragleave', () => {
+            dropZone.classList.remove('dragover');
+        });
+        dropZone.addEventListener('drop', (e) => {
+            e.preventDefault();
+            dropZone.classList.remove('dragover');
+            handleFiles(e.dataTransfer.files);
+        });
+
+        fileInput.addEventListener('change', (e) => {
+            handleFiles(e.target.files);
+        });
+
+        function handleFiles(files) {
+            selectedFiles = Array.from(files);
+            updateFileList();
+            submitBtn.disabled = selectedFiles.length === 0;
+        }
+
+        function updateFileList() {
+            fileList.innerHTML = selectedFiles.map(file => `
+                <div class="file-item">
+                    <span class="file-item-name">${file.name}</span>
+                    <span class="file-item-badge">${formatFileSize(file.size)}</span>
+                </div>
+            `).join('');
+        }
+
+        function formatFileSize(bytes) {
+            if (bytes === 0) return '0 B';
+            const k = 1024;
+            const sizes = ['B', 'KB', 'MB'];
+            const i = Math.floor(Math.log(bytes) / Math.log(k));
+            return Math.round((bytes / Math.pow(k, i)) * 100) / 100 + ' ' + sizes[i];
+        }
+
+        uploadForm.addEventListener('submit', async (e) => {
+            e.preventDefault();
+            await processFiles();
+        });
+
+        clearBtn.addEventListener('click', () => {
+            selectedFiles = [];
+            fileInput.value = '';
+            updateFileList();
+            submitBtn.disabled = true;
+            statusSection.classList.remove('visible');
+            if (pollingInterval) clearInterval(pollingInterval);
+        });
+
+        async function processFiles() {
+            if (selectedFiles.length === 0) {
+                showMessage('Please select files', 'error');
+                return;
+            }
+
+            submitBtn.disabled = true;
+            messagesDiv.innerHTML = '';
+
+            try {
+                const formData = new FormData();
+                selectedFiles.forEach(file => formData.append('files', file));
+                formData.append('remove_bg', document.getElementById('removeBg').checked);
+                formData.append('crop_face', document.getElementById('cropFace').checked);
+                formData.append('model', document.getElementById('model').value);
+
+                showMessage('Uploading files...', 'info');
+
+                const response = await fetch(`${API_BASE}/upload-and-process`, {
+                    method: 'POST',
+                    body: formData
+                });
+
+                if (!response.ok) {
+                    const error = await response.json();
+                    throw new Error(error.detail || 'Upload failed');
+                }
+
+                const data = await response.json();
+                currentJobId = data.job_id;
+                
+                showMessage(`Processing started! Job ID: ${data.job_id.substring(0, 8)}...`, 'success');
+                jobIdSpan.textContent = data.job_id;
+                statusSection.classList.add('visible');
+                downloadSection.classList.remove('visible');
+                progressContainer.style.display = 'none';
+
+                // Start polling
+                pollStatus();
+                pollingInterval = setInterval(pollStatus, 2000);
+
+            } catch (error) {
+                showMessage(error.message, 'error');
+                submitBtn.disabled = false;
+            }
+        }
+
+        async function pollStatus() {
+            try {
+                const response = await fetch(`${API_BASE}/process-status/${currentJobId}`);
+                
+                if (!response.ok) {
+                    throw new Error('Failed to fetch status');
+                }
+
+                const job = await response.json();
+                updateStatus(job);
+
+            } catch (error) {
+                showMessage(`Error checking status: ${error.message}`, 'error');
+            }
+        }
+
+        function updateStatus(job) {
+            const status = job.status;
+            
+            // Update status badge
+            statusBadge.className = `status-badge badge-${status}`;
+            statusBadge.textContent = status.toUpperCase();
+
+            // Update progress
+            const progress = job.progress;
+            const total = progress.total || 0;
+            const processed = progress.processed || 0;
+            
+            if (total > 0) {
+                progressContainer.style.display = 'block';
+                const percentage = (processed / total) * 100;
+                progressFill.style.width = percentage + '%';
+                progressFill.textContent = Math.round(percentage) + '%';
+                progressText.textContent = `${processed}/${total}`;
+            }
+
+            // Check if completed
+            if (status === 'completed') {
+                clearInterval(pollingInterval);
+                showMessage('✅ Processing complete!', 'success');
+                downloadSection.classList.add('visible');
+            } else if (status === 'failed') {
+                clearInterval(pollingInterval);
+                showMessage(`❌ Processing failed: ${job.error || 'Unknown error'}`, 'error');
+            }
+        }
+
+        function showMessage(text, type) {
+            const msgEl = document.createElement('div');
+            msgEl.className = `message ${type}`;
+            msgEl.textContent = text;
+            messagesDiv.appendChild(msgEl);
+            messagesDiv.scrollTop = messagesDiv.scrollHeight;
+        }
+
+        function downloadResults(format) {
+            const url = `${API_BASE}/download-results/${currentJobId}?format=${format}`;
+            const a = document.createElement('a');
+            a.href = url;
+            a.click();
+        }
+    </script>
+</body>
+</html>

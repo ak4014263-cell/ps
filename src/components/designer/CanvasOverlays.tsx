@@ -11,6 +11,10 @@ interface CanvasOverlaysProps {
   showSafeZone?: boolean;
   showLabels?: boolean;
   showTopIndicator?: boolean;
+  marginTopMm?: number;
+  marginLeftMm?: number;
+  marginRightMm?: number;
+  marginBottomMm?: number;
 }
 
 export function CanvasOverlays({
@@ -26,28 +30,36 @@ export function CanvasOverlays({
   showSafeZone = true,
   showLabels = true,
   showTopIndicator = true,
+  marginTopMm = 0,
+  marginLeftMm = 0,
+  marginRightMm = 0,
+  marginBottomMm = 0,
 }: CanvasOverlaysProps) {
   const bleedPx = bleedMm * mmToPixels * zoom;
-  const safeZonePx = safeZoneMm * mmToPixels * zoom;
 
-  // Calculate safe zone dimensions
-  const safeZoneWidthMm = Math.round(widthMm - (safeZoneMm * 2));
-  const safeZoneHeightMm = Math.round(heightMm - (safeZoneMm * 2));
+  const topPx = marginTopMm * mmToPixels * zoom;
+  const bottomPx = marginBottomMm * mmToPixels * zoom;
+  const leftPx = marginLeftMm * mmToPixels * zoom;
+  const rightPx = marginRightMm * mmToPixels * zoom;
+
+  // Calculate safe zone dimensions based on margins
+  const safeZoneWidthMm = Math.round(widthMm - (marginLeftMm + marginRightMm));
+  const safeZoneHeightMm = Math.round(heightMm - (marginTopMm + marginBottomMm));
 
   // Calculate bleed line dimensions (outer dimensions including bleed)
   const bleedWidthMm = Math.round(widthMm + (bleedMm * 2));
   const bleedHeightMm = Math.round(heightMm + (bleedMm * 2));
 
   return (
-    <div 
+    <div
       className="absolute inset-0 pointer-events-none"
       style={{ width: widthPx * zoom, height: heightPx * zoom }}
     >
       {/* TOP Indicator */}
       {showTopIndicator && showLabels && (
-        <div 
+        <div
           className="absolute left-1/2 -translate-x-1/2 text-[11px] font-bold tracking-wider"
-          style={{ 
+          style={{
             top: showBleed && bleedMm > 0 ? -bleedPx - 20 : -20,
             color: 'hsl(var(--destructive))',
           }}
@@ -59,7 +71,7 @@ export function CanvasOverlays({
       {/* Bleed Line */}
       {showBleed && bleedMm > 0 && (
         <>
-          <div 
+          <div
             className="absolute border-2 border-dashed rounded-sm"
             style={{
               top: -bleedPx,
@@ -70,10 +82,10 @@ export function CanvasOverlays({
             }}
           />
           {showLabels && (
-            <span 
+            <span
               className="absolute text-[10px] font-semibold tracking-wide px-1.5 py-0.5 rounded"
-              style={{ 
-                top: -bleedPx - 18, 
+              style={{
+                top: -bleedPx - 18,
                 left: '50%',
                 transform: 'translateX(-50%)',
                 color: 'hsl(186 100% 50%)',
@@ -89,21 +101,21 @@ export function CanvasOverlays({
       {/* Safe Zone */}
       {showSafeZone && safeZoneMm > 0 && (
         <>
-          <div 
+          <div
             className="absolute border-2 border-dashed rounded-lg"
             style={{
-              top: safeZonePx,
-              left: safeZonePx,
-              right: safeZonePx,
-              bottom: safeZonePx,
+              top: topPx,
+              left: leftPx,
+              right: rightPx,
+              bottom: bottomPx,
               borderColor: 'hsl(142 70% 45% / 0.7)', // Green color
             }}
           />
           {showLabels && (
-            <span 
+            <span
               className="absolute text-[10px] font-semibold tracking-wide px-1.5 py-0.5 rounded"
-              style={{ 
-                top: safeZonePx - 18, 
+              style={{
+                top: topPx - 18,
                 left: '50%',
                 transform: 'translateX(-50%)',
                 color: 'hsl(142 70% 45%)',

@@ -56,18 +56,8 @@ export function VendorDetailsDialog({ vendor, open, onOpenChange }: VendorDetail
     queryKey: ['vendor-projects', vendor?.id],
     queryFn: async () => {
       if (!vendor) return [];
-      const { data, error } = await supabase
-        .from('projects')
-        .select(`
-          id, name, project_number, status, payment_status, total_amount, created_at,
-          client:clients(name, institution_name)
-        `)
-        .eq('vendor_id', vendor.id)
-        .order('created_at', { ascending: false })
-        .limit(10);
-
-      if (error) throw error;
-      return data;
+      const response = await apiService.projectsAPI.getByVendor(vendor.id);
+      return (response.data || response || []);
     },
     enabled: !!vendor && open,
   });
@@ -77,14 +67,8 @@ export function VendorDetailsDialog({ vendor, open, onOpenChange }: VendorDetail
     queryKey: ['sub-vendors', vendor?.id],
     queryFn: async () => {
       if (!vendor || !vendor.is_master) return [];
-      const { data, error } = await supabase
-        .from('vendors')
-        .select('id, business_name, active, wallet_balance, created_at')
-        .eq('parent_vendor_id', vendor.id)
-        .order('created_at', { ascending: false });
-
-      if (error) throw error;
-      return data;
+      const response = await apiService.vendorsAPI.getSubVendors(vendor.id);
+      return (response.data || response || []);
     },
     enabled: !!vendor && vendor.is_master && open,
   });
@@ -94,15 +78,8 @@ export function VendorDetailsDialog({ vendor, open, onOpenChange }: VendorDetail
     queryKey: ['vendor-clients', vendor?.id],
     queryFn: async () => {
       if (!vendor) return [];
-      const { data, error } = await supabase
-        .from('clients')
-        .select('id, name, institution_name, active, wallet_balance, created_at')
-        .eq('vendor_id', vendor.id)
-        .order('created_at', { ascending: false })
-        .limit(10);
-
-      if (error) throw error;
-      return data;
+      const response = await apiService.clientsAPI.getByVendor(vendor.id);
+      return (response.data || response || []);
     },
     enabled: !!vendor && open,
   });

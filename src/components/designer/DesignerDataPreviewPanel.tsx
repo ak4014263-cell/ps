@@ -283,7 +283,7 @@ export function DesignerDataPreviewPanel({
     if (activeTab === 'json') {
       try {
         const parsed = JSON.parse(customJson);
-        const dataWithHeadroom = { ...parsed, __photoHeadroom: photoHeadroom };
+        const dataWithHeadroom = { ...parsed, __photoHeadroom: photoHeadroom.toString() };
         setSampleData(parsed);
         onPreviewData(dataWithHeadroom);
         toast.success('Preview data applied');
@@ -297,22 +297,22 @@ export function DesignerDataPreviewPanel({
         photo: record.photo_url || record.cropped_photo_url || '',
         photo_url: record.photo_url || '',
         cropped_photo_url: record.cropped_photo_url || '',
-        __photoHeadroom: photoHeadroom,
       };
       setSampleData(recordData);
-      onPreviewData(recordData);
+      const recordDataWithHeadroom = { ...recordData, __photoHeadroom: photoHeadroom.toString() };
+      onPreviewData(recordDataWithHeadroom);
       toast.success('Database record applied');
     } else if (activeTab === 'client' && selectedClientId) {
       const client = clients.find(c => c.id === selectedClientId);
       if (client) {
         const clientData = mapClientToPreviewData(client);
-        const dataWithHeadroom = { ...clientData, __photoHeadroom: photoHeadroom };
+        const dataWithHeadroom = { ...clientData, __photoHeadroom: photoHeadroom.toString() };
         setSampleData(clientData);
         onPreviewData(dataWithHeadroom);
         toast.success('Client data applied');
       }
     } else {
-      const dataWithHeadroom = { ...sampleData, __photoHeadroom: photoHeadroom };
+      const dataWithHeadroom = { ...sampleData, __photoHeadroom: photoHeadroom.toString() };
       onPreviewData(dataWithHeadroom);
       toast.success('Preview data applied');
     }

@@ -72,39 +72,14 @@ export function StaffManagement() {
   const { data: staffMembers = [], isLoading, refetch } = useQuery({
     queryKey: ['staff-management'],
     queryFn: async () => {
-      // Get all profiles
-      const { data: profiles, error: profilesError } = await supabase
-        .from('profiles')
-        .select('*')
-        .order('created_at', { ascending: false });
+      const response = await apiService.staffAPI.getAll();
+      const staffList = response.data || response || [];
 
-      if (profilesError) throw profilesError;
-
-      // Get all roles
-      const { data: roles, error: rolesError } = await supabase
-        .from('user_roles')
-        .select('user_id, role');
-
-      if (rolesError) throw rolesError;
-
-      // Combine profiles with roles
-      const staffWithRoles = profiles.map((profile) => {
-        const userRoles = roles
-          .filter((r) => r.user_id === profile.id)
-          .map((r) => r.role);
-
-        return {
-          ...profile,
-          roles: userRoles,
-        };
-      });
-
-      // Filter to only include staff (not clients, not vendors)
-      return staffWithRoles.filter((staff) => 
-        staff.roles.some((role: string) => 
-          ['super_admin', 'designer_staff', 'data_operator', 'sales_person', 'accounts_manager', 'production_manager'].includes(role)
-        )
-      );
+      // Transform flat staff list into the expected format with roles array
+      return staffList.map((s: any) => ({
+        ...s,
+        roles: s.role ? [s.role] : []
+      }));
     },
   });
 
@@ -174,8 +149,8 @@ export function StaffManagement() {
                       <TableCell>
                         <div className="flex flex-wrap gap-1">
                           {staff.roles.map((role: string) => (
-                            <Badge 
-                              key={role} 
+                            <Badge
+                              key={role}
                               className={`${ROLE_COLORS[role] || 'bg-gray-500'} text-white text-xs`}
                             >
                               {ROLE_LABELS[role] || role}
@@ -247,8 +222,8 @@ export function StaffManagement() {
                 <div className="text-sm text-muted-foreground mb-2">Roles</div>
                 <div className="flex flex-wrap gap-2">
                   {selectedStaff.roles.map((role: string) => (
-                    <Badge 
-                      key={role} 
+                    <Badge
+                      key={role}
                       className={`${ROLE_COLORS[role] || 'bg-gray-500'} text-white`}
                     >
                       {ROLE_LABELS[role] || role}

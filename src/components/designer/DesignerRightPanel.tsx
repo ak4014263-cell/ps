@@ -24,9 +24,12 @@ interface DesignerRightPanelProps {
   onToggleVisibility: (obj: any) => void;
   onToggleLock: (obj: any) => void;
   onReorderObject: (obj: any, direction: 'up' | 'down') => void;
+  onApplyMask?: (shape: string) => void;
+  onEditMask?: (obj: any) => void;
   customFonts?: string[];
   safeZoneMm?: number;
   mmToPixels?: number;
+  projectId?: string;
 }
 
 const TAB_ITEMS = [
@@ -48,9 +51,12 @@ export function DesignerRightPanel({
   onToggleVisibility,
   onToggleLock,
   onReorderObject,
+  onApplyMask,
+  onEditMask,
   customFonts = [],
   safeZoneMm = 4,
   mmToPixels = 3.78,
+  projectId,
 }: DesignerRightPanelProps) {
   const [activeTab, setActiveTab] = useState<RightPanelTab>('properties');
   const [isOpen, setIsOpen] = useState(false);
@@ -65,9 +71,12 @@ export function DesignerRightPanel({
             selectedObject={selectedObject}
             canvas={canvas}
             onUpdate={onUpdate}
+            onApplyMask={onApplyMask}
+            onEditMask={onEditMask}
             customFonts={customFonts}
             safeZoneMm={safeZoneMm}
             mmToPixels={mmToPixels}
+            projectId={projectId}
           />
         );
       case 'layers':
@@ -114,7 +123,7 @@ export function DesignerRightPanel({
           {isCollapsed ? 'Expand Panel' : 'Collapse Panel'}
         </TooltipContent>
       </Tooltip>
-      
+
       {TAB_ITEMS.map((item) => (
         <Tooltip key={item.id}>
           <TooltipTrigger asChild>

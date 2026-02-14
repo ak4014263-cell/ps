@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
-import { apiClient } from '@/lib/apiClient';
+import { apiService } from '@/lib/api';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import {
@@ -17,21 +17,16 @@ import { Plus, Search } from 'lucide-react';
 export default function Vendors() {
   const [searchQuery, setSearchQuery] = useState('');
 
-  const { data: vendors = [], isLoading } = useQuery({
-    queryKey: ['all-vendors'],
+  const { data: vendorsData, isLoading } = useQuery({
+    queryKey: ['all-vendors', searchQuery],
     queryFn: async () => {
-      const response = await apiClient.vendors.getAll();
-      // Extract data from response structure { success, data: [] }
+      const response = await apiService.vendorsAPI.getAll({ keyword: searchQuery || undefined });
       return (response.data || response || []);
     },
   });
 
-  const filteredVendors = vendors.filter((vendor) =>
-    searchQuery === '' ||
-    vendor.business_name.toLowerCase().includes(searchQuery.toLowerCase()) ||
-    vendor.profile?.full_name?.toLowerCase().includes(searchQuery.toLowerCase()) ||
-    vendor.profile?.email?.toLowerCase().includes(searchQuery.toLowerCase())
-  );
+  const vendors = vendorsData || [];
+  const filteredVendors = vendors;
 
   if (isLoading) {
     return (

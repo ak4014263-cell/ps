@@ -34,11 +34,11 @@ export default function Projects() {
         console.log('🔍 Profile response:', response);
         console.log('🔍 Unwrapped profile:', profile);
         console.log('🔍 Profile vendor_id:', profile?.vendor_id);
-        
+
         // Make sure vendor_id is a string, not an object
         const vendorId = profile?.vendor_id ? String(profile.vendor_id) : (user?.vendor || 'default-vendor');
         console.log('🔍 Final vendor_id:', vendorId, '(type:', typeof vendorId, ')');
-        
+
         return {
           ...profile,
           id: vendorId  // Set id AFTER spread to ensure it doesn't get overwritten
@@ -54,52 +54,26 @@ export default function Projects() {
   });
 
   // Get all projects and filter by vendor
-  const { data: projects = [], isLoading } = useQuery({
-    queryKey: ['projects', vendorData?.id],
+  const { data: projectsData, isLoading } = useQuery({
+    queryKey: ['projects', vendorData?.id, searchQuery],
     queryFn: async () => {
       try {
-        console.log('🔍 Fetching projects with vendorData:', vendorData);
-        console.log('🔍 vendorData?.id:', vendorData?.id);
-        console.log('🔍 vendorData.id !== "default-vendor":', vendorData?.id !== 'default-vendor');
-        console.log('🔍 Checking full condition:', vendorData?.id && vendorData.id !== 'default-vendor');
-        
-        const isVendor = vendorData?.id && vendorData.id !== 'default-vendor';
-        console.log('🔍 isVendor:', isVendor);
-        
-        if (isVendor) {
-          // Use vendor-specific endpoint
-          console.log('✅ Using getByVendor() with ID:', vendorData.id);
-          const url = `http://localhost:3001/api/projects?vendor_id=${encodeURIComponent(vendorData.id)}`;
-          console.log('🔗 Calling URL:', url);
-          const response = await apiService.projectsAPI.getByVendor(vendorData.id);
-          console.log('📦 Response received:', response);
-          console.log('📦 Response type:', typeof response);
-          console.log('📦 Response.data:', response?.data);
-          const result = (response?.data) || [];
-          console.log('📦 Final result array:', result);
-          console.log('📦 Result length:', result.length);
-          return result;
-        } else {
-          // Get all projects for admin
-          console.log('⚠️ Condition failed - Using getAll()');
-          const response = await apiService.projectsAPI.getAll();
-          console.log('📦 All projects response:', response);
-          return (response?.data || []);
-        }
+        const vendorId = vendorData?.id && vendorData.id !== 'default-vendor' ? vendorData.id : undefined;
+        const response = await apiService.projectsAPI.getAll({
+          vendor_id: vendorId,
+          keyword: searchQuery || undefined
+        });
+        return response?.data || [];
       } catch (error) {
         console.error('❌ Failed to fetch projects:', error);
-        console.error('❌ Error details:', error.message);
         return [];
       }
     },
     enabled: !!vendorData?.id,
   });
 
-  const filteredProjects = projects.filter((project) =>
-    searchQuery === '' ||
-    (project.project_name || '').toLowerCase().includes(searchQuery.toLowerCase()) ||
-    (project.description || '').toLowerCase().includes(searchQuery.toLowerCase())
-  );
+  const projects = projectsData || [];
+  const filteredProjects = projects;
 
   if (isLoading) {
     return (
@@ -153,7 +127,7 @@ export default function Projects() {
               </TableRow>
             ) : (
               filteredProjects.map((project: any) => (
-                <TableRow 
+                <TableRow
                   key={project.id}
                   className="cursor-pointer hover:bg-muted/50"
                   onClick={() => navigate(`/projects/${project.id}`)}

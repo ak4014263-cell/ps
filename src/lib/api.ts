@@ -47,8 +47,13 @@ export const clientsAPI = {
     return response.json();
   },
 
-  async getAll() {
-    const response = await fetch(`${API_URL}/clients`);
+  async getAll(filters: { vendor_id?: string; keyword?: string; } = {}) {
+    const params = new URLSearchParams();
+    if (filters.vendor_id) params.append('vendor_id', filters.vendor_id);
+    if (filters.keyword) params.append('keyword', filters.keyword);
+
+    const queryString = params.toString();
+    const response = await fetch(`${API_URL}/clients${queryString ? '?' + queryString : ''}`);
     if (!response.ok) throw new Error('Failed to fetch clients');
     return response.json();
   },
@@ -108,8 +113,15 @@ export const projectsAPI = {
     return response.json();
   },
 
-  async getAll() {
-    const response = await fetch(`${API_URL}/projects`);
+  async getAll(filters: { vendor_id?: string; client_id?: string; status?: string; keyword?: string; } = {}) {
+    const params = new URLSearchParams();
+    if (filters.vendor_id) params.append('vendor_id', filters.vendor_id);
+    if (filters.client_id) params.append('client_id', filters.client_id);
+    if (filters.status) params.append('status', filters.status);
+    if (filters.keyword) params.append('keyword', filters.keyword);
+
+    const queryString = params.toString();
+    const response = await fetch(`${API_URL}/projects${queryString ? '?' + queryString : ''}`);
     if (!response.ok) throw new Error('Failed to fetch projects');
     return response.json();
   },
@@ -236,8 +248,10 @@ export const templatesAPI = {
     return response.json();
   },
 
-  async getAll() {
-    const response = await fetch(`${API_URL}/templates`);
+  async getAll(params = {}) {
+    const queryString = new URLSearchParams(params as any).toString();
+    const url = `${API_URL}/templates${queryString ? '?' + queryString : ''}`;
+    const response = await fetch(url);
     if (!response.ok) throw new Error('Failed to fetch templates');
     return response.json();
   },
@@ -251,6 +265,19 @@ export const templatesAPI = {
   async getByVendor(vendorId) {
     const response = await fetch(`${API_URL}/templates/vendor/${vendorId}`);
     if (!response.ok) throw new Error('Failed to fetch vendor templates');
+    return response.json();
+  },
+
+  async generatePDF(data: any) {
+    const response = await fetch(`${API_URL}/templates/generate-pdf`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(data)
+    });
+    if (!response.ok) {
+      const error = await response.json();
+      throw new Error(error.error || 'Failed to generate PDF');
+    }
     return response.json();
   }
 };
@@ -331,8 +358,11 @@ export const vendorsAPI = {
     return response.json();
   },
 
-  async getAll() {
-    const response = await fetch(`${API_URL}/vendors`);
+  async getAll(filters: { keyword?: string } = {}) {
+    const params = new URLSearchParams();
+    if (filters.keyword) params.append('keyword', filters.keyword);
+    const queryString = params.toString();
+    const response = await fetch(`${API_URL}/vendors${queryString ? '?' + queryString : ''}`);
     if (!response.ok) throw new Error('Failed to fetch vendors');
     return response.json();
   },
@@ -340,6 +370,46 @@ export const vendorsAPI = {
   async getById(id) {
     const response = await fetch(`${API_URL}/vendors/${id}`);
     if (!response.ok) throw new Error('Failed to fetch vendor');
+    return response.json();
+  },
+
+  async getByUserId(userId: string) {
+    const response = await fetch(`${API_URL}/vendors/user/${userId}`);
+    if (!response.ok) throw new Error('Failed to fetch vendor by user ID');
+    return response.json();
+  },
+
+  async getSubVendors(id) {
+    const response = await fetch(`${API_URL}/vendors/${id}/sub-vendors`);
+    if (!response.ok) throw new Error('Failed to fetch sub-vendors');
+    return response.json();
+  },
+
+  async update(id, data) {
+    const response = await fetch(`${API_URL}/vendors/${id}`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(data),
+    });
+    if (!response.ok) throw new Error('Failed to update vendor');
+    return response.json();
+  },
+
+  async delete(id) {
+    const response = await fetch(`${API_URL}/vendors/${id}`, {
+      method: 'DELETE',
+    });
+    if (!response.ok) throw new Error('Failed to delete vendor');
+    return response.json();
+  },
+
+  async bulkUpdate(ids: string[], data: any) {
+    const response = await fetch(`${API_URL}/vendors/bulk-update`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ ids, data }),
+    });
+    if (!response.ok) throw new Error('Failed to bulk update vendors');
     return response.json();
   }
 };
@@ -401,6 +471,19 @@ export const productsAPI = {
   async getById(id) {
     const response = await fetch(`${API_URL}/products/${id}`);
     if (!response.ok) throw new Error('Failed to fetch product');
+    return response.json();
+  },
+
+  async bulkCreate(data: any[]) {
+    const response = await fetch(`${API_URL}/products/bulk`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ products: data })
+    });
+    if (!response.ok) {
+      const error = await response.json();
+      throw new Error(error.error || 'Failed to bulk create products');
+    }
     return response.json();
   }
 };
@@ -656,7 +739,20 @@ export const dataRecordsAPI = {
     return response.json();
   },
 
-  async getByProject(projectId, options = {}) {
+  async deleteBatch(ids: string[]) {
+    const response = await fetch(`${API_URL}/data-records/bulk-delete`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ ids })
+    });
+    if (!response.ok) {
+      const error = await response.json();
+      throw new Error(error.error || 'Failed to delete data records');
+    }
+    return response.json();
+  },
+
+  async getByProject(projectId: string, options: any = {}) {
     const params = new URLSearchParams();
     if (options.group_id) params.append('group_id', options.group_id);
     if (options.vendor_id) params.append('vendor_id', options.vendor_id);
@@ -664,7 +760,7 @@ export const dataRecordsAPI = {
     if (options.order) params.append('order', options.order);
     if (options.limit) params.append('limit', String(options.limit));
     if (options.offset) params.append('offset', String(options.offset));
-    
+
     const queryString = params.toString();
     const url = `${API_URL}/data-records/project/${projectId}${queryString ? '?' + queryString : ''}`;
     try {
@@ -680,7 +776,7 @@ export const dataRecordsAPI = {
     }
   },
 
-  async getByVendor(vendorId, options = {}) {
+  async getByVendor(vendorId: string, options: any = {}) {
     const params = new URLSearchParams();
     if (options.project_id) params.append('project_id', options.project_id);
     if (options.group_id) params.append('group_id', options.group_id);
@@ -688,7 +784,7 @@ export const dataRecordsAPI = {
     if (options.order) params.append('order', options.order);
     if (options.limit) params.append('limit', String(options.limit));
     if (options.offset) params.append('offset', String(options.offset));
-    
+
     const queryString = params.toString();
     const url = `${API_URL}/data-records/vendor/${vendorId}${queryString ? '?' + queryString : ''}`;
     const response = await fetch(url);
@@ -696,10 +792,10 @@ export const dataRecordsAPI = {
     return response.json();
   },
 
-  async getMaxRecordNumber(projectId, options = {}) {
+  async getMaxRecordNumber(projectId: string, options: any = {}) {
     const params = new URLSearchParams();
     if (options.vendor_id) params.append('vendor_id', options.vendor_id);
-    
+
     const queryString = params.toString();
     const url = `${API_URL}/data-records/project/${projectId}/max-record-number${queryString ? '?' + queryString : ''}`;
     const response = await fetch(url);
@@ -707,10 +803,10 @@ export const dataRecordsAPI = {
     return response.json();
   },
 
-  async getById(id, options = {}) {
+  async getById(id: string, options: any = {}) {
     const params = new URLSearchParams();
     if (options.vendor_id) params.append('vendor_id', options.vendor_id);
-    
+
     const queryString = params.toString();
     const url = `${API_URL}/data-records/${id}${queryString ? '?' + queryString : ''}`;
     const response = await fetch(url);
@@ -719,8 +815,219 @@ export const dataRecordsAPI = {
   }
 };
 
+export const libraryAPI = {
+  async getFonts(vendorId) {
+    const response = await fetch(`${API_URL}/library/fonts?vendor_id=${encodeURIComponent(vendorId)}`);
+    if (!response.ok) throw new Error('Failed to fetch library fonts');
+    return response.json();
+  },
+
+  async uploadFont(data) {
+    const formData = new FormData();
+    formData.append('file', data.file);
+    formData.append('name', data.name);
+    formData.append('is_public', String(data.isPublic));
+    formData.append('vendor_id', data.vendorId);
+
+    const response = await fetch(`${API_URL}/library/fonts`, {
+      method: 'POST',
+      body: formData
+    });
+    if (!response.ok) throw new Error('Failed to upload font');
+    return response.json();
+  },
+
+  async deleteFont(id) {
+    const response = await fetch(`${API_URL}/library/fonts/${id}`, {
+      method: 'DELETE'
+    });
+    if (!response.ok) throw new Error('Failed to delete font');
+    return response.json();
+  },
+
+  async getShapes(vendorId) {
+    const response = await fetch(`${API_URL}/library/shapes?vendor_id=${encodeURIComponent(vendorId)}`);
+    if (!response.ok) throw new Error('Failed to fetch library shapes');
+    return response.json();
+  },
+
+  async uploadShape(data) {
+    const formData = new FormData();
+    formData.append('file', data.file);
+    formData.append('name', data.name);
+    formData.append('is_public', String(data.isPublic));
+    formData.append('vendor_id', data.vendorId);
+
+    const response = await fetch(`${API_URL}/library/shapes`, {
+      method: 'POST',
+      body: formData
+    });
+    if (!response.ok) throw new Error('Failed to upload shape');
+    return response.json();
+  },
+
+  async deleteShape(id) {
+    const response = await fetch(`${API_URL}/library/shapes/${id}`, {
+      method: 'DELETE'
+    });
+    if (!response.ok) throw new Error('Failed to delete shape');
+    return response.json();
+  },
+
+  async getIcons(vendorId) {
+    const response = await fetch(`${API_URL}/library/icons?vendor_id=${encodeURIComponent(vendorId)}`);
+    if (!response.ok) throw new Error('Failed to fetch library icons');
+    return response.json();
+  },
+
+  async uploadIcon(data) {
+    const formData = new FormData();
+    formData.append('file', data.file);
+    formData.append('name', data.name);
+    formData.append('is_public', String(data.isPublic));
+    formData.append('vendor_id', data.vendorId);
+
+    const response = await fetch(`${API_URL}/library/icons`, {
+      method: 'POST',
+      body: formData
+    });
+    if (!response.ok) throw new Error('Failed to upload icon');
+    return response.json();
+  },
+
+  async deleteIcon(id) {
+    const response = await fetch(`${API_URL}/library/icons/${id}`, {
+      method: 'DELETE'
+    });
+    if (!response.ok) throw new Error('Failed to delete icon');
+    return response.json();
+  }
+};
+
+export const imageAPI = {
+  async uploadProjectPhoto(data: { file: Blob | File, projectId: string, fileName?: string }) {
+    const formData = new FormData();
+    formData.append('file', data.file);
+    formData.append('projectId', data.projectId);
+    if (data.fileName) formData.append('fileName', data.fileName);
+
+    const response = await fetch(`${API_URL}/image/upload-project-photo`, {
+      method: 'POST',
+      body: formData
+    });
+
+    if (!response.ok) {
+      const error = await response.json();
+      throw new Error(error.error || 'Failed to upload project photo');
+    }
+
+    return response.json();
+  }
+};
+
 // ============================================================================
-// API SERVICE EXPORT
+// REPORTS API
+// ============================================================================
+
+export const reportsAPI = {
+  async getSalesReport(params: { start: string, end: string, vendor_id?: string }) {
+    const query = new URLSearchParams(params as any).toString();
+    const response = await fetch(`${API_URL}/reports/sales?${query}`);
+    if (!response.ok) throw new Error('Failed to fetch sales report');
+    return response.json();
+  },
+
+  async getProfitReport(params: { start: string, end: string, vendor_id?: string }) {
+    const query = new URLSearchParams(params as any).toString();
+    const response = await fetch(`${API_URL}/reports/profit?${query}`);
+    if (!response.ok) throw new Error('Failed to fetch profit report');
+    return response.json();
+  },
+
+  async getRecentActivity() {
+    const response = await fetch(`${API_URL}/reports/activity`);
+    if (!response.ok) throw new Error('Failed to fetch recent activity');
+    return response.json();
+  }
+};
+
+// ============================================================================
+// COMPLAINTS API
+// ============================================================================
+
+export const complaintsAPI = {
+  async create(data: any) {
+    const response = await fetch(`${API_URL}/complaints`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(data)
+    });
+    if (!response.ok) {
+      const error = await response.json();
+      throw new Error(error.error || 'Failed to create complaint');
+    }
+    return response.json();
+  },
+
+  async getAll(params = {}) {
+    const query = new URLSearchParams(params as any).toString();
+    const response = await fetch(`${API_URL}/complaints?${query}`);
+    if (!response.ok) throw new Error('Failed to fetch complaints');
+    return response.json();
+  },
+
+  async updateStatus(id: string, data: any) {
+    const response = await fetch(`${API_URL}/complaints/${id}`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(data)
+    });
+    if (!response.ok) {
+      const error = await response.json();
+      throw new Error(error.error || 'Failed to update complaint');
+    }
+    return response.json();
+  }
+};
+
+// ============================================================================
+// PROJECT FILES API
+// ============================================================================
+
+export const projectFilesAPI = {
+  async getByProject(projectId: string) {
+    const response = await fetch(`${API_URL}/project-files/project/${projectId}`);
+    if (!response.ok) throw new Error('Failed to fetch project files');
+    return response.json();
+  },
+
+  async create(data: any) {
+    const response = await fetch(`${API_URL}/project-files`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(data)
+    });
+    if (!response.ok) {
+      const error = await response.json();
+      throw new Error(error.error || 'Failed to add file metadata');
+    }
+    return response.json();
+  },
+
+  async delete(id: string) {
+    const response = await fetch(`${API_URL}/project-files/${id}`, {
+      method: 'DELETE'
+    });
+    if (!response.ok) {
+      const error = await response.json();
+      throw new Error(error.error || 'Failed to delete file metadata');
+    }
+    return response.json();
+  }
+};
+
+// ============================================================================
+// MAIN API SERVICE
 // ============================================================================
 
 export const apiService = {
@@ -729,10 +1036,29 @@ export const apiService = {
   projectTasksAPI,
   projectGroupsAPI,
   dataRecordsAPI,
-  templatesAPI,
+  reportsAPI,
+  templatesAPI: {
+    ...templatesAPI,
+    async generatePDF(payload) {
+      const response = await fetch(`${API_URL}/templates/generate-pdf`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload)
+      });
+      if (!response.ok) {
+        const error = await response.json();
+        throw new Error(error.error || 'Failed to generate PDF');
+      }
+      return response.json();
+    }
+  },
   vendorsAPI,
   productsAPI,
   profilesAPI,
   teacherLinksAPI,
   staffAPI,
+  libraryAPI,
+  imageAPI,
+  complaintsAPI,
+  projectFilesAPI,
 };

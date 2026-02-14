@@ -152,7 +152,7 @@ export function DataRecordsTable({ records, projectId, groups = [], onEditRecord
 
   // Selection handlers
   const handleSelectAll = (checked: boolean) => {
-    const newSelected = checked ? new Set(filteredRecords.map(r => r.id)) : new Set();
+    const newSelected = checked ? new Set<string>(filteredRecords.map(r => r.id)) : new Set<string>();
     setSelectedIds(newSelected);
     onSelectionChange?.(newSelected);
   };
@@ -203,14 +203,12 @@ export function DataRecordsTable({ records, projectId, groups = [], onEditRecord
     setIsDeleting(true);
     try {
       const recordIds = Array.from(selectedIds);
-      
+
       // Delete photos from Cloudinary first
       await deleteCloudinaryPhotos(recordIds);
 
-      // Delete each record via backend API (no batch delete endpoint)
-      await Promise.all(
-        recordIds.map((id) => apiService.dataRecordsAPI.delete(id))
-      );
+      // Use the new batch delete endpoint
+      await apiService.dataRecordsAPI.deleteBatch(recordIds);
 
       toast.success(`Deleted ${selectedIds.size} records and their photos`);
       setSelectedIds(new Set());
@@ -232,9 +230,9 @@ export function DataRecordsTable({ records, projectId, groups = [], onEditRecord
     try {
       const recordIds = Array.from(selectedIds);
       const newGroupId = groupId === 'none' ? null : groupId;
-      
+
       console.log(`[AssignGroup] Starting: ${recordIds.length} records to group "${newGroupId}"`);
-      
+
       // Update records with new group via backend API
       const results = await Promise.allSettled(
         recordIds.map(id =>
@@ -245,33 +243,33 @@ export function DataRecordsTable({ records, projectId, groups = [], onEditRecord
       // Check results
       const fulfilled = results.filter(r => r.status === 'fulfilled');
       const failed = results.filter(r => r.status === 'rejected');
-      
+
       console.log(`[AssignGroup] Results: ${fulfilled.length} success, ${failed.length} failed`);
-      
+
       if (fulfilled.length > 0) {
         // Verify at least one update worked by checking the response data
         const successfulUpdates = fulfilled.map(r => r.value?.data?.group_id);
         console.log(`[AssignGroup] Successfully updated records with group_id:`, successfulUpdates);
-        
+
         if (!successfulUpdates.includes(newGroupId)) {
           console.warn(`[AssignGroup] WARNING: Response shows group_id mismatch`);
         }
       }
-      
+
       if (failed.length > 0) {
         console.error('[AssignGroup] Failed updates:', failed.map(r => r.reason));
         toast.error(`Failed to assign ${failed.length}/${recordIds.length} records`);
         return;
       }
-      
+
       toast.success(`✓ ${recordIds.length} records assigned to group`);
       setSelectedIds(new Set());
-      
+
       // Force a hard refresh
       console.log('[AssignGroup] Invalidating queries...');
       queryClient.invalidateQueries({ queryKey: ['project-records', projectId], exact: true });
       queryClient.invalidateQueries({ queryKey: ['project', projectId], exact: true });
-      
+
     } catch (error) {
       console.error('[AssignGroup] Exception:', error);
       toast.error('Failed to assign group: ' + (error instanceof Error ? error.message : 'Unknown error'));
@@ -326,7 +324,7 @@ export function DataRecordsTable({ records, projectId, groups = [], onEditRecord
       // Check if rembg is configured
       const config = getBackgroundRemovalConfig();
       console.log('[BG Removal] Config:', config);
-      
+
       if (config.provider !== 'rembg-local' && config.provider !== 'rembg-cloud') {
         toast.error('Background removal not available. Configure rembg first.');
         setIsRemovingBackground(false);
@@ -402,21 +400,21 @@ export function DataRecordsTable({ records, projectId, groups = [], onEditRecord
 
       // Process backgrounds directly without cropping
       console.log(`[BG Removal] Processing ${photoBlobs.length} photos with removeBackgroundBatch...`);
-      
+
       let processedResults: { recordId: string; blob: Blob }[] = [];
-      
+
       try {
         const batchResults = await removeBackgroundBatch(
           photoBlobs.map(p => p.blob),
           5
         );
-        
+
         // Map processed blobs back to record IDs using the index from batch results
         const indexToRecordId = new Map<number, string>();
         photoBlobs.forEach((photo, idx) => {
           indexToRecordId.set(idx, photo.recordId);
         });
-        
+
         for (const { index, blob } of batchResults) {
           const recordId = indexToRecordId.get(index);
           if (recordId) {
@@ -432,7 +430,7 @@ export function DataRecordsTable({ records, projectId, groups = [], onEditRecord
       }
 
       console.log(`[BG Removal] Successfully processed ${processedResults.length} out of ${photoBlobs.length} photos`);
-      
+
       if (!processedResults || processedResults.length === 0) {
         toast.dismiss(toastId);
         toast.error('No images were successfully processed. Check rembg microservice on port 5001.');
@@ -443,7 +441,7 @@ export function DataRecordsTable({ records, projectId, groups = [], onEditRecord
       // Upload processed photos and update records
       let updated = 0;
       const uploadErrors: string[] = [];
-      
+
       // Records that were submitted but not processed
       const submittedIds = new Set(photoBlobs.map(p => p.recordId));
       const processedIds = new Set(processedResults.map(p => p.recordId));
@@ -453,7 +451,7 @@ export function DataRecordsTable({ records, projectId, groups = [], onEditRecord
           failedRecords.push(id);
         }
       }
-      
+
       for (const { recordId, blob: processedBlob } of processedResults) {
 
         try {
@@ -466,7 +464,7 @@ export function DataRecordsTable({ records, projectId, groups = [], onEditRecord
           }
 
           console.log(`[BG Removal] Uploading processed photo for record ${recordId} (blob size: ${processedBlob.size} bytes)`);
-          
+
           // Upload to Cloudinary
           let uploadResult: any;
           try {
@@ -520,11 +518,11 @@ export function DataRecordsTable({ records, projectId, groups = [], onEditRecord
         }
       } else {
         console.error(`[BG Removal] FAILED: No photos were updated. Failed: ${failedRecords.length}, Errors: ${uploadErrors.length}`);
-        const details = uploadErrors.length > 0 
+        const details = uploadErrors.length > 0
           ? uploadErrors.slice(0, 5).join('\n') + (uploadErrors.length > 5 ? `\n... and ${uploadErrors.length - 5} more` : '')
           : failedRecords.length > 0
-          ? `${failedRecords.length} records could not be processed`
-          : 'Unknown error';
+            ? `${failedRecords.length} records could not be processed`
+            : 'Unknown error';
         toast.error(`Background removal failed: ${details}`);
       }
       setSelectedIds(new Set());
@@ -563,16 +561,16 @@ export function DataRecordsTable({ records, projectId, groups = [], onEditRecord
     // Prefer cropped photo when available (e.g. manual user crop)
     if (record.cropped_photo_url) {
       let url = record.cropped_photo_url;
-      
+
       if (url.startsWith('data:')) {
         return url;
       }
-      
+
       // Fix old port references
       if (url.includes('localhost:5000')) {
         url = fixPortInUrl(url);
       }
-      
+
       if (url.startsWith('http://') || url.startsWith('https://')) {
         return url;
       }
@@ -584,21 +582,21 @@ export function DataRecordsTable({ records, projectId, groups = [], onEditRecord
 
       return `${backendBase}/uploads/project-photos/${projectId}/${encodeURIComponent(url)}`;
     }
-    
+
     // Check direct photo_url field
     if (record.photo_url) {
       let url = record.photo_url;
-      
+
       if (url.startsWith('data:')) {
         console.log(`[PhotoDisplay] Using direct URL for record ${record.id.substring(0, 12)}: ${url.substring(0, 60)}`);
         return url;
       }
-      
+
       // Fix old port references
       if (url.includes('localhost:5000')) {
         url = fixPortInUrl(url);
       }
-      
+
       // If it's a full URL, return it
       if (url.startsWith('http://') || url.startsWith('https://')) {
         console.log(`[PhotoDisplay] Using direct URL for record ${record.id.substring(0, 12)}: ${url.substring(0, 60)}`);
@@ -609,26 +607,26 @@ export function DataRecordsTable({ records, projectId, groups = [], onEditRecord
       if (record.photo_url.startsWith('/api/') || record.photo_url.startsWith('/uploads/')) {
         return `${backendBase}${record.photo_url}`;
       }
-      
+
       // Skip old failed photo paths from before migration
       if (record.photo_url.includes('uploads/photos/')) {
         console.log(`[PhotoDisplay] Skipping old failed path for record ${record.id.substring(0, 12)}`);
         return null; // Skip these - they were base64 attempts that failed
       }
-      
+
       // If it already looks like a relative path to uploads (old format with project-photos), handle it
       if (record.photo_url.includes('uploads/')) {
         const url = `http://localhost:3001/${record.photo_url}`;
         console.log(`[PhotoDisplay] Using relative path for record ${record.id.substring(0, 12)}: ${url.substring(0, 80)}`);
         return url;
       }
-      
+
       // Otherwise, construct backend URL for local files (new format - just filename)
       const finalUrl = `${backendBase}/uploads/project-photos/${projectId}/${encodeURIComponent(record.photo_url)}`;
       console.log(`[PhotoDisplay] Constructed URL for record ${record.id.substring(0, 12)}: photo_url="${record.photo_url.substring(0, 40)}..." → ${finalUrl.substring(0, 100)}`);
       return finalUrl;
     }
-    
+
     // Check various photo field names in data_json (including profilePic from CSV)
     const photoFields = [
       'photo_url',
@@ -646,20 +644,20 @@ export function DataRecordsTable({ records, projectId, groups = [], onEditRecord
       'Picture',
     ];
     let photoValue: string | null = null;
-    
+
     for (const field of photoFields) {
       if (data[field]) {
         photoValue = data[field];
         break;
       }
     }
-    
+
     if (!photoValue) return null;
-    
+
     // If it's already a full URL or data URL, return as is
-    if (photoValue.startsWith('http://') || 
-        photoValue.startsWith('https://') || 
-        photoValue.startsWith('data:')) {
+    if (photoValue.startsWith('http://') ||
+      photoValue.startsWith('https://') ||
+      photoValue.startsWith('data:')) {
       return photoValue;
     }
 
@@ -672,7 +670,7 @@ export function DataRecordsTable({ records, projectId, groups = [], onEditRecord
     // Note: These files may not exist on disk if photos weren't properly uploaded
     return `${backendBase}/uploads/project-photos/${projectId}/${encodeURIComponent(photoValue)}`;
   };
-  
+
   // Fetch photo with error handling
   const fetchPhotoBlob = async (photoUrl: string): Promise<Blob | null> => {
     if (!photoUrl) return null;
@@ -723,33 +721,23 @@ export function DataRecordsTable({ records, projectId, groups = [], onEditRecord
       console.log('Uploading to Cloudinary...');
       const uploadedUrl = await uploadToCloudinary(cropData.blob, {
         folder: `projects/${projectId}/cropped`,
-        public_id: `crop-${record.record_number}-${Date.now()}`
+        publicId: `crop-${record.record_number}-${Date.now()}`
       });
       console.log('Cloudinary upload success:', uploadedUrl);
 
       // Save to database
-      console.log('Updating Supabase record...');
-      const { data, error } = await supabase
-        .from('data_records')
-        .update({
-          cropped_photo_url: uploadedUrl,
-          face_crop_coordinates: {
-            x: Math.round(cropData.croppedDimensions.x),
-            y: Math.round(cropData.croppedDimensions.y),
-            width: Math.round(cropData.croppedDimensions.width),
-            height: Math.round(cropData.croppedDimensions.height)
-          }
-        })
-        .eq('id', record.id)
-        .select();
+      console.log('Updating database record...');
+      await apiService.dataRecordsAPI.update(record.id, {
+        cropped_photo_url: uploadedUrl,
+        face_crop_coordinates: {
+          x: Math.round(cropData.croppedDimensions.x),
+          y: Math.round(cropData.croppedDimensions.y),
+          width: Math.round(cropData.croppedDimensions.width),
+          height: Math.round(cropData.croppedDimensions.height)
+        }
+      });
 
-      if (error) {
-        console.error('Supabase error:', error);
-        toast.error(`Database error: ${error.message}`);
-        return;
-      }
-
-      console.log('Supabase update success:', data);
+      console.log('Database update success');
       toast.success('Image cropped and saved successfully');
       queryClient.invalidateQueries({ queryKey: ['project-records', projectId] });
       setCropDialogOpen(false);
@@ -821,7 +809,7 @@ export function DataRecordsTable({ records, projectId, groups = [], onEditRecord
               className="pl-10"
             />
           </div>
-          
+
           {/* Filter Button */}
           <Popover open={showFilters} onOpenChange={setShowFilters}>
             <PopoverTrigger asChild>
@@ -906,7 +894,7 @@ export function DataRecordsTable({ records, projectId, groups = [], onEditRecord
         <div className="flex items-center gap-2">
           {/* Clear Selection */}
           {selectedIds.size > 0 && (
-            <Button 
+            <Button
               variant="default"
               onClick={() => setSelectedIds(new Set())}
             >
@@ -933,8 +921,8 @@ export function DataRecordsTable({ records, projectId, groups = [], onEditRecord
                       </DropdownMenuSubTrigger>
                       <DropdownMenuSubContent>
                         {groups.map((group) => (
-                          <DropdownMenuItem 
-                            key={group.id} 
+                          <DropdownMenuItem
+                            key={group.id}
                             onClick={() => handleAssignGroup(group.id)}
                           >
                             {group.name}
@@ -949,7 +937,7 @@ export function DataRecordsTable({ records, projectId, groups = [], onEditRecord
                     <DropdownMenuSeparator />
                   </>
                 )}
-                <DropdownMenuItem 
+                <DropdownMenuItem
                   disabled={selectedIds.size === 0 || isRemovingBackground}
                   onClick={handleRemoveBackgroundBulk}
                 >
@@ -965,7 +953,7 @@ export function DataRecordsTable({ records, projectId, groups = [], onEditRecord
                     </>
                   )}
                 </DropdownMenuItem>
-                <DropdownMenuItem 
+                <DropdownMenuItem
                   onClick={() => setShowDeleteDialog(true)}
                   className="text-destructive"
                 >
@@ -1039,7 +1027,7 @@ export function DataRecordsTable({ records, projectId, groups = [], onEditRecord
                     <TableCell className="font-medium">{index + 1}</TableCell>
                     <TableCell>
                       <div className="flex items-center gap-3">
-                        <Avatar 
+                        <Avatar
                           className="h-10 w-10 cursor-pointer hover:ring-2 hover:ring-primary transition-all"
                           onClick={() => setImagePreview({
                             open: true,
@@ -1056,8 +1044,8 @@ export function DataRecordsTable({ records, projectId, groups = [], onEditRecord
                         </Avatar>
                         <div className="flex flex-col">
                           <span className="font-medium">{getDisplayName(record)}</span>
-                          <Badge 
-                            variant={record.processing_status === 'completed' ? 'default' : 'secondary'} 
+                          <Badge
+                            variant={record.processing_status === 'completed' ? 'default' : 'secondary'}
                             className="w-fit text-xs mt-0.5"
                           >
                             {record.processing_status?.toUpperCase() || 'PENDING'}
@@ -1074,7 +1062,7 @@ export function DataRecordsTable({ records, projectId, groups = [], onEditRecord
                       </TableCell>
                     ))}
                     <TableCell>
-                      <Badge 
+                      <Badge
                         variant={record.processing_status === 'completed' ? 'default' : 'secondary'}
                         className={record.processing_status === 'completed' ? 'bg-green-500' : ''}
                       >
@@ -1120,7 +1108,7 @@ export function DataRecordsTable({ records, projectId, groups = [], onEditRecord
                               </DropdownMenuSub>
                             </>
                           )}
-                          <DropdownMenuItem 
+                          <DropdownMenuItem
                             onClick={() => handleDeleteRecord(record)}
                             className="text-destructive"
                           >
@@ -1169,8 +1157,8 @@ export function DataRecordsTable({ records, projectId, groups = [], onEditRecord
         <AlertDialogContent>
           <AlertDialogHeader>
             <AlertDialogTitle>
-              {recordToDelete 
-                ? `Delete Record #${recordToDelete.record_number}` 
+              {recordToDelete
+                ? `Delete Record #${recordToDelete.record_number}`
                 : `Delete ${selectedIds.size} Records`
               }
             </AlertDialogTitle>
@@ -1183,7 +1171,7 @@ export function DataRecordsTable({ records, projectId, groups = [], onEditRecord
           </AlertDialogHeader>
           <AlertDialogFooter>
             <AlertDialogCancel disabled={isDeleting}>Cancel</AlertDialogCancel>
-            <AlertDialogAction 
+            <AlertDialogAction
               onClick={recordToDelete ? confirmDelete : handleBulkDelete}
               disabled={isDeleting}
               className="bg-destructive text-destructive-foreground hover:bg-destructive/90"

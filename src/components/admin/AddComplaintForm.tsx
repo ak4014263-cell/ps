@@ -42,13 +42,8 @@ export function AddComplaintForm() {
   const { data: vendors = [] } = useQuery({
     queryKey: ['vendors-list'],
     queryFn: async () => {
-      const { data, error } = await supabase
-        .from('vendors')
-        .select('id, business_name')
-        .eq('active', true)
-        .order('business_name');
-      if (error) throw error;
-      return data;
+      const response = await apiService.vendorsAPI.getAll();
+      return (response.data || response || []);
     },
     enabled: open && isSuperAdmin,
   });
@@ -56,43 +51,23 @@ export function AddComplaintForm() {
   const { data: clients = [] } = useQuery({
     queryKey: ['clients-list', formData.vendor_id],
     queryFn: async () => {
-      let query = supabase
-        .from('clients')
-        .select('id, name, institution_name')
-        .eq('active', true)
-        .order('name');
-      
-      if (formData.vendor_id) {
-        query = query.eq('vendor_id', formData.vendor_id);
-      }
-      
-      const { data, error } = await query;
-      if (error) throw error;
-      return data;
+      const response = await apiService.clientsAPI.getByVendor(formData.vendor_id);
+      return (response.data || response || []);
     },
-    enabled: open,
+    enabled: open && !!formData.vendor_id,
   });
 
   const { data: projects = [] } = useQuery({
     queryKey: ['projects-list', formData.vendor_id, formData.client_id],
     queryFn: async () => {
-      let query = supabase
-        .from('projects')
-        .select('id, name, project_number')
-        .order('created_at', { ascending: false });
-      
-      if (formData.vendor_id) {
-        query = query.eq('vendor_id', formData.vendor_id);
-      }
+      const response = await apiService.projectsAPI.getByVendor(formData.vendor_id);
+      let data = (response.data || response || []) as any[];
       if (formData.client_id) {
-        query = query.eq('client_id', formData.client_id);
+        data = data.filter((p: any) => p.client_id === formData.client_id);
       }
-      
-      const { data, error } = await query;
-      if (error) throw error;
       return data;
     },
-    enabled: open && (!!formData.vendor_id || !!formData.client_id),
+    enabled: open && !!formData.vendor_id,
   });
 
   const handleSubmit = async (e: React.FormEvent) => {
@@ -100,7 +75,7 @@ export function AddComplaintForm() {
     setLoading(true);
 
     try {
-      const { error } = await supabase.from('complaints').insert({
+      await apiService.complaintsAPI.create({
         title: formData.title.trim(),
         description: formData.description.trim(),
         priority: formData.priority,
@@ -108,8 +83,6 @@ export function AddComplaintForm() {
         vendor_id: formData.vendor_id,
         project_id: formData.project_id || null,
       });
-
-      if (error) throw error;
 
       toast.success('Complaint created successfully');
       queryClient.invalidateQueries({ queryKey: ['complaints'] });

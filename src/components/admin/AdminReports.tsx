@@ -36,141 +36,36 @@ export function AdminReports() {
   const { data: vendors = [] } = useQuery({
     queryKey: ['vendors-for-reports'],
     queryFn: async () => {
-      const { data, error } = await supabase
-        .from('vendors')
-        .select('id, business_name')
-        .order('business_name');
-      if (error) throw error;
-      return data;
+      const response = await apiService.vendorsAPI.getAll();
+      return (response.data || response || []);
     },
   });
 
   const { data: salesReport, isLoading: salesLoading } = useQuery({
     queryKey: ['sales-report', dateRange, selectedVendor],
     queryFn: async () => {
-      let query = supabase
-        .from('projects')
-        .select(`
-          id, name, project_number, status, total_amount, paid_amount, quantity, created_at,
-          vendor:vendors(id, business_name),
-          client:clients(institution_name),
-          product:products(name, category)
-        `)
-        .gte('created_at', dateRange.start)
-        .lte('created_at', dateRange.end + 'T23:59:59')
-        .order('created_at', { ascending: false });
-
-      if (selectedVendor !== 'all') {
-        query = query.eq('vendor_id', selectedVendor);
-      }
-
-      const { data, error } = await query;
-      if (error) throw error;
-
-      // Aggregate data
-      const totalSales = data.reduce((sum, p) => sum + Number(p.total_amount || 0), 0);
-      const totalCollected = data.reduce((sum, p) => sum + Number(p.paid_amount || 0), 0);
-      const totalQuantity = data.reduce((sum, p) => sum + Number(p.quantity || 0), 0);
-      const totalPending = totalSales - totalCollected;
-
-      // Group by vendor
-      const byVendor = data.reduce((acc: Record<string, any>, project) => {
-        const vendorId = project.vendor?.id || 'unknown';
-        const vendorName = project.vendor?.business_name || 'Unknown';
-        if (!acc[vendorId]) {
-          acc[vendorId] = {
-            name: vendorName,
-            totalSales: 0,
-            totalCollected: 0,
-            projectCount: 0,
-            quantity: 0,
-          };
-        }
-        acc[vendorId].totalSales += Number(project.total_amount || 0);
-        acc[vendorId].totalCollected += Number(project.paid_amount || 0);
-        acc[vendorId].projectCount += 1;
-        acc[vendorId].quantity += Number(project.quantity || 0);
-        return acc;
-      }, {});
-
-      // Group by status
-      const byStatus = data.reduce((acc: Record<string, number>, project) => {
-        const status = project.status || 'draft';
-        acc[status] = (acc[status] || 0) + 1;
-        return acc;
-      }, {});
-
-      return {
-        projects: data,
-        summary: {
-          totalSales,
-          totalCollected,
-          totalPending,
-          totalQuantity,
-          projectCount: data.length,
-          collectionRate: totalSales > 0 ? Math.round((totalCollected / totalSales) * 100) : 0,
-        },
-        byVendor: Object.values(byVendor),
-        byStatus,
+      const params: any = {
+        start: dateRange.start,
+        end: dateRange.end
       };
+      if (selectedVendor !== 'all') {
+        params.vendor_id = selectedVendor;
+      }
+      return await apiService.reportsAPI.getSalesReport(params);
     },
   });
 
   const { data: profitReport, isLoading: profitLoading } = useQuery({
     queryKey: ['profit-report', dateRange, selectedVendor],
     queryFn: async () => {
-      let paymentsQuery = supabase
-        .from('payments')
-        .select(`
-          id, amount, payment_method, created_at,
-          vendor:vendors(id, business_name, commission_percentage)
-        `)
-        .gte('created_at', dateRange.start)
-        .lte('created_at', dateRange.end + 'T23:59:59');
-
-      if (selectedVendor !== 'all') {
-        paymentsQuery = paymentsQuery.eq('vendor_id', selectedVendor);
-      }
-
-      const { data: payments, error } = await paymentsQuery;
-      if (error) throw error;
-
-      const totalRevenue = payments.reduce((sum, p) => sum + Number(p.amount || 0), 0);
-      
-      // Calculate commission-based profit (simplified)
-      const byVendor = payments.reduce((acc: Record<string, any>, payment) => {
-        const vendorId = payment.vendor?.id || 'unknown';
-        const vendorName = payment.vendor?.business_name || 'Unknown';
-        const commission = payment.vendor?.commission_percentage || 0;
-        
-        if (!acc[vendorId]) {
-          acc[vendorId] = {
-            name: vendorName,
-            revenue: 0,
-            commission,
-            commissionAmount: 0,
-            transactionCount: 0,
-          };
-        }
-        const amount = Number(payment.amount || 0);
-        acc[vendorId].revenue += amount;
-        acc[vendorId].commissionAmount += (amount * commission) / 100;
-        acc[vendorId].transactionCount += 1;
-        return acc;
-      }, {});
-
-      const totalCommission = Object.values(byVendor).reduce((sum: number, v: any) => sum + v.commissionAmount, 0);
-
-      return {
-        payments,
-        summary: {
-          totalRevenue,
-          totalCommission,
-          netRevenue: totalRevenue - totalCommission,
-          transactionCount: payments.length,
-        },
-        byVendor: Object.values(byVendor),
+      const params: any = {
+        start: dateRange.start,
+        end: dateRange.end
       };
+      if (selectedVendor !== 'all') {
+        params.vendor_id = selectedVendor;
+      }
+      return await apiService.reportsAPI.getProfitReport(params);
     },
   });
 
@@ -415,8 +310,8 @@ export function AdminReports() {
                 </TableHeader>
                 <TableBody>
                   {(salesReport?.byVendor || []).map((vendor: any, index: number) => {
-                    const collectionRate = vendor.totalSales > 0 
-                      ? Math.round((vendor.totalCollected / vendor.totalSales) * 100) 
+                    const collectionRate = vendor.totalSales > 0
+                      ? Math.round((vendor.totalCollected / vendor.totalSales) * 100)
                       : 0;
                     return (
                       <TableRow key={index}>

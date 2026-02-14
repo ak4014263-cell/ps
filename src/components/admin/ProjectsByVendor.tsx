@@ -26,36 +26,21 @@ export function ProjectsByVendor() {
   const { data: vendors = [] } = useQuery({
     queryKey: ['vendors-dropdown'],
     queryFn: async () => {
-      const { data, error } = await supabase
-        .from('vendors')
-        .select('id, business_name')
-        .order('business_name');
-
-      if (error) throw error;
-      return data;
+      const response = await apiService.vendorsAPI.getAll();
+      return (response.data || response || []);
     },
   });
 
   const { data: projects = [], isLoading } = useQuery({
     queryKey: ['projects-by-vendor', selectedVendor],
     queryFn: async () => {
-      let query = supabase
-        .from('projects')
-        .select(`
-          *,
-          vendor:vendors(business_name),
-          client:clients(name, institution_name),
-          product:products(name, category)
-        `)
-        .order('created_at', { ascending: false });
-
       if (selectedVendor !== 'all') {
-        query = query.eq('vendor_id', selectedVendor);
+        const response = await apiService.projectsAPI.getByVendor(selectedVendor);
+        return (response.data || response || []);
+      } else {
+        const response = await apiService.projectsAPI.getAll();
+        return (response.data || response || []);
       }
-
-      const { data, error } = await query;
-      if (error) throw error;
-      return data;
     },
   });
 
@@ -130,8 +115,8 @@ export function ProjectsByVendor() {
                           project.payment_status === 'completed'
                             ? 'default'
                             : project.payment_status === 'partial'
-                            ? 'secondary'
-                            : 'outline'
+                              ? 'secondary'
+                              : 'outline'
                         }
                         className={
                           project.payment_status === 'completed'

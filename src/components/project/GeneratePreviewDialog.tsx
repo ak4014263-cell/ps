@@ -51,14 +51,9 @@ export function GeneratePreviewDialog({ projectId, vendorId, groups }: GenerateP
   const { data: templates = [] } = useQuery({
     queryKey: ['vendor-templates-preview', vendorId],
     queryFn: async () => {
-      const { data, error } = await supabase
-        .from('templates')
-        .select('id, name, category')
-        .or(`vendor_id.eq.${vendorId},is_public.eq.true`)
-        .order('name');
-
-      if (error) throw error;
-      return data as Template[];
+      const response = await apiService.templatesAPI.getByVendor(vendorId);
+      // Fallback to all if vendor filter returns nothing or handle public
+      return (response.data || response || []) as Template[];
     },
     enabled: open && !!vendorId,
   });
@@ -73,21 +68,19 @@ export function GeneratePreviewDialog({ projectId, vendorId, groups }: GenerateP
     setPreviewUrl(null);
 
     try {
-      // Build query for records
-      let query = supabase
-        .from('data_records')
-        .select('*')
-        .eq('project_id', projectId)
-        .order('record_number')
-        .limit(10); // Preview is limited to first 10 records for performance
+      // Build options for records
+      const options: any = {
+        limit: 10,
+        order_by: 'record_number',
+        order: 'asc'
+      };
 
       if (selectedGroupId !== '__all__') {
-        query = query.eq('group_id', selectedGroupId);
+        options.group_id = selectedGroupId;
       }
 
-      const { data: records, error: recordsError } = await query;
-
-      if (recordsError) throw recordsError;
+      const recordsResponse = await apiService.dataRecordsAPI.getByProject(projectId, options);
+      const records = recordsResponse.data || recordsResponse || [];
 
       if (!records || records.length === 0) {
         toast.error('No records found for the selected criteria');
@@ -96,35 +89,26 @@ export function GeneratePreviewDialog({ projectId, vendorId, groups }: GenerateP
       }
 
       // Get template
-      const { data: template, error: templateError } = await supabase
-        .from('templates')
-        .select('*')
-        .eq('id', selectedTemplateId)
-        .single();
+      const templateResponse = await apiService.templatesAPI.getById(selectedTemplateId);
+      const template = templateResponse.data || templateResponse;
 
-      if (templateError) throw templateError;
-
-      // Call generate-pdf edge function with correct payload
-      const { data: pdfData, error: pdfError } = await supabase.functions.invoke('generate-pdf', {
-        body: {
-          projectId: projectId,
-          groupId: selectedGroupId === '__all__' ? undefined : selectedGroupId,
-          templateData: {
-            design_json: template.design_json,
-            back_design_json: template.back_design_json,
-            has_back_side: template.has_back_side,
-            width_mm: template.width_mm,
-            height_mm: template.height_mm,
-          },
-          records: records,
-          options: {
-            pageSize: 'A4',
-            orientation: 'portrait',
-          },
+      // Call generate-pdf API
+      const pdfData = await apiService.templatesAPI.generatePDF({
+        projectId: projectId,
+        groupId: selectedGroupId === '__all__' ? undefined : selectedGroupId,
+        templateData: {
+          design_json: template.design_json,
+          back_design_json: template.back_design_json,
+          has_back_side: template.has_back_side,
+          width_mm: template.width_mm,
+          height_mm: template.height_mm,
+        },
+        records: records,
+        options: {
+          pageSize: 'A4',
+          orientation: 'portrait',
         },
       });
-
-      if (pdfError) throw pdfError;
 
       if (pdfData?.url) {
         setPreviewUrl(pdfData.url);

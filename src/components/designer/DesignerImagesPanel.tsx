@@ -6,9 +6,9 @@ import { ScrollArea } from '@/components/ui/scroll-area';
 import { Input } from '@/components/ui/input';
 import { Slider } from '@/components/ui/slider';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
-import { X, Upload, User, Barcode, QrCode, Square, Circle, Hexagon, Star, Heart, Octagon, Pentagon } from 'lucide-react';
+import { X, Upload, User, Barcode, QrCode, Square, Circle, Hexagon, Triangle, Star, Heart, Octagon, Pentagon } from 'lucide-react';
 
-export type PhotoShape = 'rect' | 'rounded-rect' | 'circle' | 'ellipse' | 'hexagon' | 'star' | 'heart' | 'octagon' | 'pentagon' | 'custom';
+export type PhotoShape = 'rect' | 'rounded-rect' | 'circle' | 'ellipse' | 'hexagon' | 'triangle' | 'star' | 'heart' | 'octagon' | 'pentagon' | 'custom';
 
 export interface CustomShapeMask {
   name: string;
@@ -44,6 +44,7 @@ const PHOTO_SHAPES: { id: PhotoShape; name: string; icon: React.ReactNode }[] = 
   { id: 'circle', name: 'Circle', icon: <Circle className="h-5 w-5" /> },
   { id: 'ellipse', name: 'Ellipse', icon: <div className="h-4 w-6 border-2 border-current rounded-full" /> },
   { id: 'hexagon', name: 'Hexagon', icon: <Hexagon className="h-5 w-5" /> },
+  { id: 'triangle', name: 'Triangle', icon: <Triangle className="h-5 w-5" /> },
   { id: 'star', name: 'Star', icon: <Star className="h-5 w-5" /> },
   { id: 'heart', name: 'Heart', icon: <Heart className="h-5 w-5" /> },
   { id: 'octagon', name: 'Octagon', icon: <Octagon className="h-5 w-5" /> },
@@ -73,7 +74,7 @@ export function DesignerImagesPanel({
   const [selectedPhotoShape, setSelectedPhotoShape] = useState<PhotoShape>('rect');
   const [selectedCustomMask, setSelectedCustomMask] = useState<string | null>(null);
   const [fontName, setFontName] = useState('');
-  
+
   // Border state for photo placeholder
   const [borderConfig, setBorderConfig] = useState<PhotoBorderConfig>({
     color: '#000000',
@@ -81,7 +82,7 @@ export function DesignerImagesPanel({
     style: 'solid',
     radius: 0,
   });
-  
+
   // Update border config when selected object changes
   useEffect(() => {
     if (selectedObject?.data?.isPhoto) {
@@ -146,20 +147,20 @@ export function DesignerImagesPanel({
       onChangePhotoShape('custom', maskUrl);
     }
   };
-  
+
   const handleBorderUpdate = (key: keyof PhotoBorderConfig, value: any) => {
     const newConfig = { ...borderConfig, [key]: value };
     setBorderConfig(newConfig);
-    
+
     if (selectedObject?.data?.isPhoto && canvas) {
       // Apply stroke properties
       selectedObject.set('stroke', newConfig.color);
       selectedObject.set('strokeWidth', newConfig.width);
-      
+
       // Store border style in data for PDF generation
       if (!selectedObject.data) selectedObject.data = {};
       selectedObject.data.borderStyle = newConfig.style;
-      
+
       // Apply dash array based on style - scale with stroke width for visibility
       const strokeWidth = newConfig.width || 1;
       if (newConfig.style === 'dashed') {
@@ -173,13 +174,13 @@ export function DesignerImagesPanel({
         selectedObject.set('strokeDashArray', null);
         selectedObject.set('strokeLineCap', 'butt');
       }
-      
+
       // Apply border radius if it's a rect shape
       if (selectedObject.type === 'rect' || selectedObject.data?.photoShape === 'rect' || selectedObject.data?.photoShape === 'rounded-rect') {
         selectedObject.set('rx', newConfig.radius);
         selectedObject.set('ry', newConfig.radius);
       }
-      
+
       canvas.requestRenderAll();
       onUpdatePhotoBorder?.(newConfig);
     }
@@ -187,7 +188,7 @@ export function DesignerImagesPanel({
 
   // Combine custom shapes and library shapes for the photo mask options
   const allCustomMasks = [...customShapes, ...libraryShapes];
-  
+
   const isPhotoSelected = selectedObject?.data?.isPhoto;
 
   return (
@@ -223,66 +224,7 @@ export function DesignerImagesPanel({
 
           <Separator />
 
-          {/* Photo Placeholder with Shape Selection */}
-          <div className="space-y-3">
-            <h4 className="font-medium text-sm">Photo Placeholder</h4>
-            <p className="text-xs text-muted-foreground">
-              {selectedObject?.data?.isPhoto 
-                ? 'Click a shape to change the selected placeholder' 
-                : 'Select shape, then click to add'}
-            </p>
-            
-            <div className="grid grid-cols-3 gap-2">
-              {PHOTO_SHAPES.filter(s => s.id !== 'custom').map((shape) => (
-                <Button
-                  key={shape.id}
-                  variant={selectedPhotoShape === shape.id && !selectedCustomMask ? "default" : "outline"}
-                  className="h-14 flex-col gap-1 p-1"
-                  onClick={() => handleShapeClick(shape.id)}
-                >
-                  {shape.icon}
-                  <span className="text-[10px]">{shape.name}</span>
-                </Button>
-              ))}
-            </div>
 
-            {/* Custom Masks from Library Shapes for Photo Placeholder */}
-            {allCustomMasks.length > 0 && (
-              <div className="space-y-2">
-                <Label className="text-xs text-muted-foreground">Library Shapes (as masks)</Label>
-                <div className="grid grid-cols-4 gap-2">
-                  {allCustomMasks.map((shape, index) => (
-                    <Button
-                      key={`${shape.url}-${index}`}
-                      variant={selectedCustomMask === shape.url ? "default" : "outline"}
-                      className="h-12 w-full p-1"
-                      title={`Use ${shape.name} as mask`}
-                      onClick={() => handleUseCustomMask(shape.url, shape.name)}
-                    >
-                      <img src={shape.url} alt={shape.name} className="w-full h-full object-contain" />
-                    </Button>
-                  ))}
-                </div>
-              </div>
-            )}
-            
-            <input
-              ref={customMaskInputRef}
-              type="file"
-              accept=".svg,.png"
-              className="hidden"
-              onChange={handleCustomMaskUpload}
-            />
-            
-            <Button
-              variant="secondary"
-              className="w-full h-10"
-              onClick={() => onAddPlaceholder('photo', selectedPhotoShape, selectedCustomMask || undefined)}
-            >
-              <User className="h-4 w-4 mr-2" />
-              Add Photo ({selectedCustomMask ? 'Custom' : PHOTO_SHAPES.find(s => s.id === selectedPhotoShape)?.name})
-            </Button>
-          </div>
 
           {/* Photo Border Controls - Only shown when photo placeholder is selected */}
           {isPhotoSelected && (
@@ -293,7 +235,7 @@ export function DesignerImagesPanel({
                 <p className="text-xs text-muted-foreground">
                   Customize the border of the selected photo placeholder
                 </p>
-                
+
                 {/* Border Width */}
                 <div className="space-y-1">
                   <Label className="text-xs">Border Width: {borderConfig.width}px</Label>
@@ -305,7 +247,7 @@ export function DesignerImagesPanel({
                     step={1}
                   />
                 </div>
-                
+
                 {/* Border Color */}
                 <div className="space-y-1">
                   <Label className="text-xs">Border Color</Label>
@@ -325,7 +267,7 @@ export function DesignerImagesPanel({
                     />
                   </div>
                 </div>
-                
+
                 {/* Border Style */}
                 <div className="space-y-1">
                   <Label className="text-xs">Border Style</Label>
@@ -343,7 +285,7 @@ export function DesignerImagesPanel({
                     </SelectContent>
                   </Select>
                 </div>
-                
+
                 {/* Border Radius - only for rect shapes */}
                 {(selectedObject?.data?.photoShape === 'rect' || selectedObject?.data?.photoShape === 'rounded-rect' || !selectedObject?.data?.photoShape) && (
                   <div className="space-y-1">
@@ -407,7 +349,7 @@ export function DesignerImagesPanel({
               className="hidden"
               onChange={handleShapeUpload}
             />
-            
+
             {customShapes.length > 0 && (
               <div className="grid grid-cols-4 gap-2 mt-2">
                 {customShapes.map((shape, index) => (
@@ -456,7 +398,7 @@ export function DesignerImagesPanel({
               className="hidden"
               onChange={handleFontUpload}
             />
-            
+
             {customFonts.length > 0 && (
               <div className="space-y-1 mt-2">
                 <Label className="text-xs text-muted-foreground">Loaded Fonts:</Label>

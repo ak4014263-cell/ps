@@ -34,13 +34,8 @@ export function AssignProjectForm() {
   const { data: vendors = [] } = useQuery({
     queryKey: ['all-vendors'],
     queryFn: async () => {
-      const { data, error } = await supabase
-        .from('vendors')
-        .select('id, business_name')
-        .eq('active', true)
-        .order('business_name');
-      if (error) throw error;
-      return data;
+      const response = await apiService.vendorsAPI.getAll();
+      return (response.data || response || []);
     },
   });
 
@@ -48,14 +43,8 @@ export function AssignProjectForm() {
     queryKey: ['clients-by-vendor', formData.vendor_id],
     queryFn: async () => {
       if (!formData.vendor_id) return [];
-      const { data, error } = await supabase
-        .from('clients')
-        .select('id, name, institution_name')
-        .eq('vendor_id', formData.vendor_id)
-        .eq('active', true)
-        .order('name');
-      if (error) throw error;
-      return data;
+      const response = await apiService.clientsAPI.getByVendor(formData.vendor_id);
+      return (response.data || response || []);
     },
     enabled: !!formData.vendor_id,
   });
@@ -63,13 +52,8 @@ export function AssignProjectForm() {
   const { data: products = [] } = useQuery({
     queryKey: ['products'],
     queryFn: async () => {
-      const { data, error } = await supabase
-        .from('products')
-        .select('id, name, base_price')
-        .eq('active', true)
-        .order('name');
-      if (error) throw error;
-      return data;
+      const response = await apiService.productsAPI.getAll();
+      return (response.data || response || []);
     },
   });
 
@@ -77,12 +61,8 @@ export function AssignProjectForm() {
     queryKey: ['vendor-staff', formData.vendor_id],
     queryFn: async () => {
       if (!formData.vendor_id) return [];
-      const { data, error } = await supabase
-        .from('profiles')
-        .select('id, full_name, email')
-        .order('full_name');
-      if (error) throw error;
-      return data;
+      const response = await apiService.staffAPI.getAll();
+      return (response.data || response || []);
     },
     enabled: !!formData.vendor_id,
   });
@@ -99,7 +79,7 @@ export function AssignProjectForm() {
     setLoading(true);
 
     try {
-      const { error } = await supabase.from('projects').insert({
+      await apiService.projectsAPI.create({
         project_number: generateProjectNumber(),
         name: formData.name.trim(),
         description: formData.description.trim() || null,
@@ -114,8 +94,6 @@ export function AssignProjectForm() {
         status: 'draft',
         payment_status: 'pending',
       });
-
-      if (error) throw error;
 
       toast.success('Project assigned successfully');
       queryClient.invalidateQueries({ queryKey: ['projects'] });

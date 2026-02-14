@@ -35,7 +35,7 @@ export function AddProductForm() {
     setLoading(true);
 
     try {
-      const { error } = await supabase.from('products').insert({
+      await apiService.productsAPI.create({
         name: formData.name.trim(),
         category: formData.category.trim(),
         description: formData.description.trim() || null,
@@ -44,8 +44,6 @@ export function AddProductForm() {
         default_height_mm: formData.default_height_mm ? parseFloat(formData.default_height_mm) : null,
         active: formData.active,
       });
-
-      if (error) throw error;
 
       toast.success('Product added successfully');
       queryClient.invalidateQueries({ queryKey: ['products'] });

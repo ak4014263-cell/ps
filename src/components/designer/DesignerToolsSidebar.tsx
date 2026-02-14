@@ -1,15 +1,15 @@
 import { Button } from '@/components/ui/button';
 import { Tooltip, TooltipContent, TooltipTrigger, TooltipProvider } from '@/components/ui/tooltip';
 import { Separator } from '@/components/ui/separator';
-import { 
-  MousePointer2, 
+import {
+  MousePointer2,
   Hand,
   ZoomIn,
   Move,
   Crop,
-  Type, 
-  Shapes, 
-  Image, 
+  Type,
+  Shapes,
+  Image,
   LayoutGrid,
   Paintbrush,
   Database,
@@ -18,10 +18,11 @@ import {
   FileText,
   QrCode,
   Barcode,
-  Settings
+  Settings,
+  Scissors
 } from 'lucide-react';
 
-export type SidebarTab = 'elements' | 'background' | 'images' | 'layout' | 'data' | 'library' | 'batch';
+export type SidebarTab = 'elements' | 'background' | 'images' | 'layout' | 'data' | 'library' | 'batch' | 'masking';
 export type ToolType = 'select' | 'pan' | 'text';
 
 interface DesignerToolsSidebarProps {
@@ -49,6 +50,7 @@ const PANEL_ITEMS = [
   { id: 'background' as SidebarTab, icon: Paintbrush, label: 'Background' },
   { id: 'layout' as SidebarTab, icon: LayoutGrid, label: 'Layout & Size' },
   { id: 'library' as SidebarTab, icon: Library, label: 'Library' },
+  { id: 'masking' as SidebarTab, icon: Scissors, label: 'Photo Mask' },
   { id: 'batch' as SidebarTab, icon: FileText, label: 'Batch PDF Generation' },
 ];
 
@@ -58,11 +60,11 @@ const EXTRA_ITEMS = [
   { id: 'barcode', icon: Barcode, label: 'Barcode' },
 ];
 
-export function DesignerToolsSidebar({ 
-  activeTab, 
-  onTabChange, 
-  activeTool, 
-  onToolChange 
+export function DesignerToolsSidebar({
+  activeTab,
+  onTabChange,
+  activeTool,
+  onToolChange
 }: DesignerToolsSidebarProps) {
   return (
     <TooltipProvider>

@@ -73,10 +73,10 @@ export function DataRecordsList({ records, projectId }: DataRecordsListProps) {
         const dataValues = Object.values(record.data_json)
           .filter(v => v !== null && typeof v !== 'object')
           .map(v => String(v).toLowerCase());
-        
+
         const matchesData = dataValues.some(v => v.includes(query));
         const matchesRecordNumber = record.record_number.toString().includes(query);
-        
+
         return matchesData || matchesRecordNumber;
       }
 
@@ -113,16 +113,11 @@ export function DataRecordsList({ records, projectId }: DataRecordsListProps) {
     setIsDeleting(true);
     try {
       const recordIds = Array.from(selectedIds);
-      
+
       // Delete photos from Cloudinary first
       await deleteCloudinaryPhotos(recordIds);
 
-      const { error } = await supabase
-        .from('data_records')
-        .delete()
-        .in('id', recordIds);
-
-      if (error) throw error;
+      await apiService.dataRecordsAPI.deleteBatch(recordIds);
 
       toast.success(`Deleted ${selectedIds.size} records and their photos`);
       setSelectedIds(new Set());
@@ -147,7 +142,7 @@ export function DataRecordsList({ records, projectId }: DataRecordsListProps) {
     setIsLoadingSample(true);
     try {
       const startingNumber = (records[records.length - 1]?.record_number || 0) + 1;
-      
+
       const sampleRecords = SAMPLE_DATA.map((data, index) => ({
         project_id: projectId,
         record_number: startingNumber + index,
@@ -155,11 +150,7 @@ export function DataRecordsList({ records, projectId }: DataRecordsListProps) {
         processing_status: index % 3 === 0 ? 'completed' : 'pending'
       }));
 
-      const { error } = await supabase
-        .from('data_records')
-        .insert(sampleRecords);
-
-      if (error) throw error;
+      await apiService.dataRecordsAPI.createBatch(sampleRecords);
 
       toast.success(`Added ${sampleRecords.length} sample records`);
       queryClient.invalidateQueries({ queryKey: ['project-records', projectId] });
@@ -250,8 +241,8 @@ export function DataRecordsList({ records, projectId }: DataRecordsListProps) {
                 <p className="text-muted-foreground">No data records yet.</p>
                 <div className="flex gap-2 justify-center">
                   <AddDataDialog projectId={projectId} />
-                  <Button 
-                    variant="outline" 
+                  <Button
+                    variant="outline"
                     onClick={loadSampleData}
                     disabled={isLoadingSample}
                   >
@@ -273,7 +264,7 @@ export function DataRecordsList({ records, projectId }: DataRecordsListProps) {
                 className="mt-4"
               />
               <div className="flex-1">
-                <DataRecordItem 
+                <DataRecordItem
                   record={record}
                   projectId={projectId}
                 />
@@ -301,8 +292,8 @@ export function DataRecordsList({ records, projectId }: DataRecordsListProps) {
           </AlertDialogHeader>
           <AlertDialogFooter>
             <AlertDialogCancel disabled={isDeleting}>Cancel</AlertDialogCancel>
-            <AlertDialogAction 
-              onClick={handleBulkDelete} 
+            <AlertDialogAction
+              onClick={handleBulkDelete}
               disabled={isDeleting}
               className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
             >

@@ -23,7 +23,7 @@ export default function TemplateDesigner() {
 
       return {
         id: template.id,
-        name: template.template_name,
+        name: template.name || template.template_name,
         category: template.template_type || 'design',
         width_mm: data.width_mm || 85.6,
         height_mm: data.height_mm || 54,
@@ -61,8 +61,8 @@ export default function TemplateDesigner() {
   }
 
   return (
-    <AdvancedTemplateDesigner 
-      editTemplate={editTemplate} 
+    <AdvancedTemplateDesigner
+      editTemplate={editTemplate}
       onBack={() => navigate(-1)}
       projectId={effectiveProjectId || undefined}
       projectClient={projectWithClient?.clients || undefined}

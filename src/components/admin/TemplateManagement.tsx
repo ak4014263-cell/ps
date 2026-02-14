@@ -35,8 +35,8 @@ import {
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Label } from '@/components/ui/label';
 import { Checkbox } from '@/components/ui/checkbox';
-import { 
-  Search, MoreHorizontal, Edit, Trash2, RefreshCcw, Plus, 
+import {
+  Search, MoreHorizontal, Edit, Trash2, RefreshCcw, Plus,
   FileText, Eye, Copy, Globe
 } from 'lucide-react';
 import { toast } from 'sonner';
@@ -61,7 +61,10 @@ type Template = {
   };
 };
 
+import { useAuth } from '@/hooks/useAuth';
+
 export function TemplateManagement() {
+  const { user } = useAuth();
   const [searchQuery, setSearchQuery] = useState('');
   const [categoryFilter, setCategoryFilter] = useState<string>('all');
   const [publicFilter, setPublicFilter] = useState<string>('all');
@@ -77,11 +80,38 @@ export function TemplateManagement() {
 
   const queryClient = useQueryClient();
 
+  // Fetch current vendor data if user is not admin
+  const { data: vendorData } = useQuery({
+    queryKey: ['current-vendor', user?.id],
+    queryFn: async () => {
+      if (!user?.id) return null;
+      try {
+        // If apiService.vendorsAPI.getByUserId is not available (it was added recently), handle gracefully
+        // But we added it in step 484, so it should be fine.
+        const vendor = await apiService.vendorsAPI.getByUserId(user.id);
+        return vendor;
+      } catch (e) {
+        console.error('Failed to fetch vendor data:', e);
+        return null;
+      }
+    },
+    enabled: !!user?.id && user?.role !== 'admin' && user?.role !== 'super_admin',
+  });
+
   const { data: templates = [], isLoading, refetch } = useQuery({
-    queryKey: ['templates-management'],
+    queryKey: ['templates-management', vendorData?.id, user?.role],
     queryFn: async () => {
       try {
-        const response = await apiService.templatesAPI.getAll();
+        let params: any = {};
+
+        // If regular user (vendor), filter by vendor_id
+        if (user?.role !== 'admin' && user?.role !== 'super_admin') {
+          // If we haven't loaded vendor data yet, don't fetch templates or return empty
+          if (!vendorData?.id) return [];
+          params.vendor_id = vendorData.id;
+        }
+
+        const response = await apiService.templatesAPI.getAll(params);
         const data = (response.data || response || []);
         return data as Template[];
       } catch (error) {
@@ -89,6 +119,7 @@ export function TemplateManagement() {
         return [];
       }
     },
+    enabled: !!user, // Wait for user to be loaded
   });
 
   const { data: products = [] } = useQuery({
@@ -106,11 +137,7 @@ export function TemplateManagement() {
 
   const updateTemplateMutation = useMutation({
     mutationFn: async ({ id, data }: { id: string; data: Partial<Template> }) => {
-      const { error } = await supabase
-        .from('templates')
-        .update(data)
-        .eq('id', id);
-      if (error) throw error;
+      await apiService.templatesAPI.update(id, data);
     },
     onSuccess: () => {
       toast.success('Template updated successfully');
@@ -124,11 +151,7 @@ export function TemplateManagement() {
 
   const togglePublicMutation = useMutation({
     mutationFn: async ({ id, isPublic }: { id: string; isPublic: boolean }) => {
-      const { error } = await supabase
-        .from('templates')
-        .update({ is_public: !isPublic })
-        .eq('id', id);
-      if (error) throw error;
+      await apiService.templatesAPI.update(id, { is_public: !isPublic });
     },
     onSuccess: () => {
       toast.success('Template visibility updated');
@@ -141,11 +164,7 @@ export function TemplateManagement() {
 
   const deleteTemplateMutation = useMutation({
     mutationFn: async (id: string) => {
-      const { error } = await supabase
-        .from('templates')
-        .delete()
-        .eq('id', id);
-      if (error) throw error;
+      await apiService.templatesAPI.delete(id);
     },
     onSuccess: () => {
       toast.success('Template deleted');
