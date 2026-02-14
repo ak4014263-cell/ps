@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { apiService } from '@/lib/api';
 import { useAuth } from '@/hooks/useAuth';
@@ -38,6 +38,28 @@ export function AddComplaintForm() {
     vendor_id: '',
     project_id: '',
   });
+
+  // Auto-populate vendor_id for non-super admins
+  useEffect(() => {
+    if (open && !isSuperAdmin && user?.id && !formData.vendor_id) {
+      const getVendorInfo = async () => {
+        try {
+          const response = await apiService.profilesAPI.getById(user.id);
+          const profile = response.data || response;
+          const vId = profile?.vendor_id || (typeof user?.vendor === 'object' ? user.vendor.id : user?.vendor);
+          if (vId) {
+            setFormData(prev => ({ ...prev, vendor_id: vId }));
+          }
+        } catch (error) {
+          const vId = (typeof user?.vendor === 'object' ? user.vendor.id : user?.vendor);
+          if (vId) {
+            setFormData(prev => ({ ...prev, vendor_id: vId }));
+          }
+        }
+      };
+      getVendorInfo();
+    }
+  }, [open, isSuperAdmin, user?.id]);
 
   const { data: vendors = [] } = useQuery({
     queryKey: ['vendors-list'],

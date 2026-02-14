@@ -29,8 +29,8 @@ export default function Clients() {
       try {
         const profile = await apiService.profilesAPI.getById(user.id);
         return {
-          id: profile?.vendor_id || user?.vendor || 'default-vendor',
-          ...profile
+          ...profile,
+          id: profile?.vendor_id || user?.vendor || 'default-vendor'
         };
       } catch (error) {
         console.error('Failed to fetch vendor:', error);

@@ -19,9 +19,12 @@ import {
   SelectValue,
 } from '@/components/ui/select';
 import { Badge } from '@/components/ui/badge';
-import { Search } from 'lucide-react';
+import { Search, Plus } from 'lucide-react';
+import { Button } from '@/components/ui/button';
+import { useNavigate } from 'react-router-dom';
 
 export default function AdminStaff() {
+  const navigate = useNavigate();
   const { user } = useAuth();
   const [searchQuery, setSearchQuery] = useState('');
   const [vendorFilter, setVendorFilter] = useState<string>('all');
@@ -42,12 +45,12 @@ export default function AdminStaff() {
       try {
         const response = await apiService.staffAPI.getAll();
         let allStaff = response.data || response || [];
-        
+
         // Filter by vendor if needed
         if (vendorFilter !== 'all') {
           allStaff = allStaff.filter((s: any) => s.vendor_id === vendorFilter);
         }
-        
+
         return allStaff;
       } catch (error) {
         console.error('Failed to fetch staff:', error);
@@ -81,9 +84,15 @@ export default function AdminStaff() {
 
   return (
     <main className="flex-1 p-4 sm:p-6 bg-background">
-      <div className="mb-6">
-        <h1 className="text-2xl sm:text-3xl font-bold text-foreground">All Staff Members</h1>
-        <p className="text-muted-foreground text-sm sm:text-base">View staff across all vendors</p>
+      <div className="mb-6 flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+        <div>
+          <h1 className="text-2xl sm:text-3xl font-bold text-foreground">All Staff Members</h1>
+          <p className="text-muted-foreground text-sm sm:text-base">View staff across all vendors</p>
+        </div>
+        <Button onClick={() => navigate('/dashboard/add-staff')}>
+          <Plus className="h-4 w-4 mr-2" />
+          Add Staff Member
+        </Button>
       </div>
 
       <div className="flex flex-col sm:flex-row gap-4 mb-6">

@@ -1,6 +1,8 @@
 import { useQuery } from '@tanstack/react-query';
 import { apiClient } from '@/lib/apiClient';
 import { useAuth } from '@/hooks/useAuth';
+import { useUserRole } from '@/hooks/useUserRole';
+import { apiService } from '@/lib/api';
 import {
   Table,
   TableBody,
@@ -16,6 +18,27 @@ import { format } from 'date-fns';
 
 export default function Transactions() {
   const { user } = useAuth();
+  const { isVendor } = useUserRole();
+
+  // Fetch vendor ID and wallet balance if user is a vendor
+  const { data: vendorData } = useQuery({
+    queryKey: ['vendor-profile', user?.id],
+    queryFn: async () => {
+      if (!isVendor || !user?.id) return null;
+      try {
+        const profile = await apiService.profilesAPI.getById(user.id);
+        if (profile?.vendor_id) {
+          const vendor = await apiService.vendorsAPI.getById(profile.vendor_id);
+          return vendor.data || vendor;
+        }
+        return null;
+      } catch (error) {
+        console.error('Failed to fetch vendor:', error);
+        return null;
+      }
+    },
+    enabled: isVendor && !!user?.id,
+  });
 
   const { data: transactions = [], isLoading } = useQuery({
     queryKey: ['wallet-transactions'],

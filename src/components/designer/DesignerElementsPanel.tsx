@@ -8,8 +8,10 @@ import { Separator } from '@/components/ui/separator';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 import {
   Type, Square, Circle, Triangle, Star, Minus, Image, QrCode, Barcode,
-  ArrowRight, Hexagon, Pentagon, X, User, Sparkles
+  ArrowRight, Hexagon, Pentagon, X, User, Sparkles, ChevronDown, Database
 } from 'lucide-react';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
+import { STANDARD_FIELDS } from '@/lib/designerConstants';
 
 export type PhotoShape = 'rect' | 'rounded-rect' | 'circle' | 'ellipse' | 'hexagon' | 'star' | 'heart' | 'octagon' | 'pentagon';
 
@@ -20,6 +22,7 @@ interface DesignerElementsPanelProps {
   onAddPlaceholder: (type: 'photo' | 'barcode' | 'qrcode', shape?: PhotoShape) => void;
   onClose?: () => void;
   canvasRef?: React.RefObject<HTMLCanvasElement>;
+  detectedVariables?: string[];
 }
 
 const SHAPES = [
@@ -39,11 +42,12 @@ export function DesignerElementsPanel({
   onAddPlaceholder,
   onClose,
   canvasRef,
+  detectedVariables = [],
 }: DesignerElementsPanelProps) {
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [photoPopoverOpen, setPhotoPopoverOpen] = useState<string | null>(null);
 
-  const [textboxDialogOpen, setTextboxDialogOpen] = useState(false);
+
 
   const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
@@ -58,10 +62,7 @@ export function DesignerElementsPanel({
     setPhotoPopoverOpen(null);
   };
 
-  const handleTextboxConfirm = (text: string, isVariable: boolean, asBox: boolean) => {
-    onAddText(text, isVariable, asBox);
-    setTextboxDialogOpen(false);
-  };
+
 
 
 
@@ -246,10 +247,43 @@ export function DesignerElementsPanel({
                       {`{}`}
                     </div>
                     <div className="flex flex-col items-start">
-                      <span className="text-xs font-medium">Add Variable Field</span>
-                      <span className="text-[10px] text-muted-foreground">Dynamic data placeholder</span>
+                      <span className="text-xs font-medium">Add Manual Variable</span>
+                      <span className="text-[10px] text-muted-foreground">Type your own {'{{field}}'}</span>
                     </div>
                   </Button>
+
+                  <div className="space-y-1.5 pt-1">
+                    <Label className="text-[10px] text-muted-foreground px-1 uppercase">Standard Database Fields</Label>
+                    <Select onValueChange={(val) => onAddText(`{{${val}}}`, true, true)}>
+                      <SelectTrigger className="w-full h-10 text-xs">
+                        <div className="flex items-center gap-2">
+                          <Database className="h-3.5 w-3.5 text-primary" />
+                          <SelectValue placeholder="Select Database Field" />
+                        </div>
+                      </SelectTrigger>
+                      <SelectContent className="bg-popover max-h-[300px]">
+                        <ScrollArea className="h-[250px]">
+                          {detectedVariables.length > 0 && (
+                            <>
+                              <div className="px-2 py-1 text-[10px] font-bold text-muted-foreground uppercase opacity-50">Fields in Use</div>
+                              {detectedVariables.map((field) => (
+                                <SelectItem key={`inuse-${field}`} value={field} className="text-xs">
+                                  {field}
+                                </SelectItem>
+                              ))}
+                              <Separator className="my-1" />
+                            </>
+                          )}
+                          <div className="px-2 py-1 text-[10px] font-bold text-muted-foreground uppercase opacity-50">Standard Fields</div>
+                          {STANDARD_FIELDS.map((field) => (
+                            <SelectItem key={field} value={field} className="text-xs">
+                              {field}
+                            </SelectItem>
+                          ))}
+                        </ScrollArea>
+                      </SelectContent>
+                    </Select>
+                  </div>
                 </div>
               </div>
             </TabsContent>

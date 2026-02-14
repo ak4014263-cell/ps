@@ -30,15 +30,7 @@ import { generateBarcodeDataUrl, generateQRCodeDataUrl, BarcodeFormat } from '@/
 import { FabricImage } from 'fabric';
 import { toast } from 'sonner';
 
-const STANDARD_FIELDS = [
-  'S.No.', 'Name', 'schoolCode', 'admNo', 'firstName', 'lastName', 'dob',
-  'className', 'sec', 'gender', 'profilePic', 'link', 'fatherName', 'motherName',
-  'fatherMobNo', 'email', 'admDate', 'session', 'fatherAadhaar', 'fatherOccupation',
-  'fatherProfilePic', 'fatherWhatsApp', 'motherAadhaar', 'motherMobNo',
-  'motherOccupation', 'motherWhatsApp', 'bloodGroup', 'religion', 'caste',
-  'subCaste', 'schoolHouse', 'address', 'transportMode', 'rfid', 'Status',
-  'Group', 'Class'
-];
+import { STANDARD_FIELDS } from '@/lib/designerConstants';
 
 const BARCODE_FORMATS: { value: BarcodeFormat; label: string }[] = [
   { value: 'CODE128', label: 'Code 128' },
@@ -1498,10 +1490,27 @@ export function DesignerPropertiesPanel({
                 )}
 
                 <div className="space-y-1">
-                  <Label className="text-[10px] text-muted-foreground">Current Shape</Label>
-                  <div className="text-xs bg-muted px-2 py-1 rounded capitalize">
-                    {properties.photoShape || 'Rectangle'}
-                  </div>
+                  <Label className="text-[10px] text-muted-foreground">Shape Mask</Label>
+                  <Select
+                    value={properties.photoShape || 'rect'}
+                    onValueChange={(v) => onApplyMask?.(v)}
+                  >
+                    <SelectTrigger className="h-8 text-xs">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="rect">Rectangle</SelectItem>
+                      <SelectItem value="rounded-rect">Rounded</SelectItem>
+                      <SelectItem value="circle">Circle</SelectItem>
+                      <SelectItem value="ellipse">Ellipse</SelectItem>
+                      <SelectItem value="hexagon">Hexagon</SelectItem>
+                      <SelectItem value="triangle">Triangle</SelectItem>
+                      <SelectItem value="star">Star</SelectItem>
+                      <SelectItem value="heart">Heart</SelectItem>
+                      <SelectItem value="octagon">Octagon</SelectItem>
+                      <SelectItem value="pentagon">Pentagon</SelectItem>
+                    </SelectContent>
+                  </Select>
                 </div>
 
                 <div className="space-y-1">

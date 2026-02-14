@@ -69,9 +69,7 @@ import { Label } from '@/components/ui/label';
 import { ProjectGroupsManager } from '@/components/project/ProjectGroupsManager';
 import { ProjectTemplateManager } from '@/components/project/ProjectTemplateManager';
 import { GeneratePreviewDialog } from '@/components/project/GeneratePreviewDialog';
-import { ProjectPDFGenerator } from '@/components/project/ProjectPDFGenerator';
 import { BatchDataRecordsPDFGenerator } from '@/components/project/BatchDataRecordsPDFGenerator';
-import { PDFGenerator } from '@/components/pdf/PDFGenerator';
 import { AddDataDialog } from '@/components/project/AddDataDialog';
 import { DataRecordsTable } from '@/components/project/DataRecordsTable';
 import { EditRecordDialog } from '@/components/project/EditRecordDialog';
@@ -1081,18 +1079,6 @@ export default function ProjectDetails() {
                     width_mm: t.width_mm,
                     height_mm: t.height_mm
                   }))}
-                />
-                <ProjectPDFGenerator
-                  projectId={projectId!}
-                  projectName={project.name}
-                  vendorId={project.vendor_id}
-                  groups={project.groups?.map(g => ({
-                    id: g.id,
-                    name: g.name,
-                    template_id: g.template_id,
-                    record_count: g.record_count || 0
-                  })) || []}
-                  templates={templates}
                 />
                 <GeneratePreviewDialog
                   projectId={projectId!}

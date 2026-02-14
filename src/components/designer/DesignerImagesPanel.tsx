@@ -6,7 +6,9 @@ import { ScrollArea } from '@/components/ui/scroll-area';
 import { Input } from '@/components/ui/input';
 import { Slider } from '@/components/ui/slider';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
-import { X, Upload, User, Barcode, QrCode, Square, Circle, Hexagon, Triangle, Star, Heart, Octagon, Pentagon } from 'lucide-react';
+import { X, Upload, User, Barcode, QrCode, Square, Circle, Hexagon, Triangle, Star, Heart, Octagon, Pentagon, Image as ImageIcon } from 'lucide-react';
+import { useQuery } from '@tanstack/react-query';
+import { apiService } from '@/lib/api';
 
 export type PhotoShape = 'rect' | 'rounded-rect' | 'circle' | 'ellipse' | 'hexagon' | 'triangle' | 'star' | 'heart' | 'octagon' | 'pentagon' | 'custom';
 
@@ -36,6 +38,8 @@ interface DesignerImagesPanelProps {
   selectedObject?: any;
   canvas?: any;
   onClose: () => void;
+  projectId?: string;
+  onAddProjectPhoto?: (url: string) => void;
 }
 
 const PHOTO_SHAPES: { id: PhotoShape; name: string; icon: React.ReactNode }[] = [
@@ -66,6 +70,8 @@ export function DesignerImagesPanel({
   selectedObject,
   canvas,
   onClose,
+  projectId,
+  onAddProjectPhoto,
 }: DesignerImagesPanelProps) {
   const fileInputRef = useRef<HTMLInputElement>(null);
   const shapeInputRef = useRef<HTMLInputElement>(null);
@@ -74,6 +80,26 @@ export function DesignerImagesPanel({
   const [selectedPhotoShape, setSelectedPhotoShape] = useState<PhotoShape>('rect');
   const [selectedCustomMask, setSelectedCustomMask] = useState<string | null>(null);
   const [fontName, setFontName] = useState('');
+
+  // Fetch project files (images)
+  const { data: projectPhotos = [] } = useQuery({
+    queryKey: ['project-files', projectId],
+    queryFn: async () => {
+      if (!projectId) return [];
+      try {
+        const result = await apiService.projectFilesAPI.getByProject(projectId);
+        // Filter for images
+        return (result.data || result || []).filter((file: any) =>
+          file.file_type?.startsWith('image/') ||
+          /\.(jpg|jpeg|png|gif|webp|svg)$/i.test(file.file_name || '')
+        );
+      } catch (error) {
+        console.error('Failed to fetch project photos:', error);
+        return [];
+      }
+    },
+    enabled: !!projectId,
+  });
 
   // Border state for photo placeholder
   const [borderConfig, setBorderConfig] = useState<PhotoBorderConfig>({
@@ -224,6 +250,35 @@ export function DesignerImagesPanel({
 
           <Separator />
 
+          {/* Project Photos Section */}
+          {projectId && (
+            <div className="space-y-3">
+              <h4 className="font-medium text-sm">Project Photos</h4>
+              {projectPhotos.length > 0 ? (
+                <div className="grid grid-cols-2 gap-2">
+                  {projectPhotos.map((photo: any) => (
+                    <div
+                      key={photo.id}
+                      className="relative group border rounded-md overflow-hidden cursor-pointer hover:border-primary aspect-square bg-muted/20"
+                      onClick={() => onAddProjectPhoto?.(photo.file_url)}
+                    >
+                      <img
+                        src={photo.file_url}
+                        alt={photo.file_name}
+                        className="w-full h-full object-cover"
+                      />
+                      <div className="absolute inset-x-0 bottom-0 bg-black/60 text-white text-[10px] p-1 truncate opacity-0 group-hover:opacity-100 transition-opacity">
+                        {photo.file_name}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              ) : (
+                <p className="text-xs text-muted-foreground italic">No photos found in this project.</p>
+              )}
+            </div>
+          )}
+
 
 
           {/* Photo Border Controls - Only shown when photo placeholder is selected */}
@@ -309,6 +364,14 @@ export function DesignerImagesPanel({
           <div className="space-y-3">
             <h4 className="font-medium text-sm">Other Placeholders</h4>
             <div className="space-y-2">
+              <Button
+                variant="outline"
+                className="w-full justify-start h-10"
+                onClick={() => onAddPlaceholder('photo')}
+              >
+                <ImageIcon className="h-4 w-4 mr-2" />
+                Photo Placeholder
+              </Button>
               <Button
                 variant="outline"
                 className="w-full justify-start h-10"

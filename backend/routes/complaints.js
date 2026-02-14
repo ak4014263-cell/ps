@@ -74,8 +74,28 @@ router.get('/', async (req, res) => {
         sql += ' ORDER BY c.created_at DESC LIMIT 100';
 
         const complaints = await getAll(sql, params);
-        res.json({ success: true, count: complaints.length, data: complaints });
+
+        // Transform for frontend
+        const transformed = complaints.map(c => ({
+            ...c,
+            client: c.client_id ? {
+                id: c.client_id,
+                institution_name: c.client_name,
+                name: c.client_name // Fallback
+            } : null,
+            vendor: c.vendor_id ? {
+                id: c.vendor_id,
+                business_name: c.vendor_name
+            } : null,
+            project: c.project_id ? {
+                id: c.project_id,
+                project_number: c.project_number
+            } : null
+        }));
+
+        res.json({ success: true, count: transformed.length, data: transformed });
     } catch (error) {
+        console.error('Get complaints error:', error);
         res.status(500).json({ success: false, error: error.message });
     }
 });

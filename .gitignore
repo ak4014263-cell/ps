@@ -10,3 +10,9 @@ processed_ids_*.zip
 backend/node_modules
 rembg-microservice/venv
 rembg-microservice/__pycache__
+
+# Database dumps
+*.sql
+
+# Dependencies
+node_modules/

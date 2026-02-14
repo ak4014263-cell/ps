@@ -7,6 +7,8 @@ interface User {
   fullName?: string;
   role?: string;
   vendor?: any;
+  vendor_id?: string;
+  permissions?: string[];
 }
 
 interface Session {
@@ -27,7 +29,7 @@ export const useAuth = () => {
     // Check localStorage for existing session
     const savedSession = localStorage.getItem('session');
     const savedToken = localStorage.getItem('auth_token');
-    
+
     if (savedSession && savedToken) {
       try {
         const parsedSession = JSON.parse(savedSession);
@@ -51,7 +53,7 @@ export const useAuth = () => {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ token })
       });
-      
+
       if (!response.ok) {
         localStorage.removeItem('session');
         localStorage.removeItem('auth_token');
@@ -90,7 +92,7 @@ export const useAuth = () => {
       setSession(newSession);
       localStorage.setItem('session', JSON.stringify(newSession));
       localStorage.setItem('auth_token', data.data.token);
-      
+
       return newSession;
     } catch (error: any) {
       throw new Error(error.message || 'Login failed');
@@ -121,7 +123,7 @@ export const useAuth = () => {
       setSession(newSession);
       localStorage.setItem('session', JSON.stringify(newSession));
       localStorage.setItem('auth_token', data.data.token);
-      
+
       return newSession;
     } catch (error: any) {
       throw new Error(error.message || 'Signup failed');

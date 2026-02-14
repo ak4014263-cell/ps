@@ -60,7 +60,8 @@ if ($null -eq $scpCmd) {
     Write-Host "⚠️  SCP not found. Installing OpenSSH Client..." -ForegroundColor Yellow
     # Windows 10/11 has built-in SSH
     Write-Host "📝 Tip: Use 'Add-WindowsCapability -Online -Name OpenSSH.Client' to install SSH" -ForegroundColor Gray
-} else {
+}
+else {
     Write-Host "✅ SSH/SCP tools found" -ForegroundColor Green
 }
 

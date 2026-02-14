@@ -17,19 +17,24 @@ import Products from './Products';
 import Vendors from './Vendors';
 import Settings from './Settings';
 import { useUserRole } from '@/hooks/useUserRole';
+import { useAuth } from '@/hooks/useAuth';
 import { VendorManagement } from '@/components/admin/VendorManagement';
 import { ClientManagement } from '@/components/admin/ClientManagement';
 import { GlobalProjectsView } from '@/components/admin/GlobalProjectsView';
 import { TemplateManagement } from '@/components/admin/TemplateManagement';
 import { AdminReportsPanel } from '@/components/admin/AdminReportsPanel';
 import { CreateVendorForm } from '@/components/admin/CreateVendorForm';
-import { CreateStaffForm } from '@/components/admin/CreateStaffForm';import { TeacherLinkManagement } from '@/components/admin/TeacherLinkManagement';
+import { CreateStaffForm } from '@/components/admin/CreateStaffForm';
+import { TeacherLinkManagement } from '@/components/admin/TeacherLinkManagement';
 import { AdvancedTemplateDesigner } from '@/components/designer/AdvancedTemplateDesigner';
 
 export default function Dashboard() {
   const location = useLocation();
-  const { isSuperAdmin } = useUserRole();
-  
+  const { user } = useAuth();
+  const { isSuperAdmin, isVendor, hasRole } = useUserRole();
+
+  const isVendorStaff = hasRole('vendor_staff');
+
   const renderContent = () => {
     // Super admin gets their own panel on dashboard
     if (isSuperAdmin && location.pathname === '/dashboard') {
@@ -59,7 +64,35 @@ export default function Dashboard() {
           return <TeacherLinkManagement />;
       }
     }
+    // Permission check for staff
+    const isStaff = isVendorStaff ||
+      hasRole('designer_staff') ||
+      hasRole('data_operator') ||
+      hasRole('sales_person') ||
+      hasRole('accounts_manager') ||
+      hasRole('production_manager');
 
+    if (isStaff && user?.permissions && Array.isArray(user.permissions)) {
+      const pathPermissions: Record<string, string> = {
+        '/items': 'items',
+        '/dashboard/clients': 'clients',
+        '/dashboard/projects': 'projects',
+        '/dashboard/tasks': 'tasks',
+        '/dashboard/print-orders': 'print_orders',
+        '/dashboard/transactions': 'transactions',
+        '/dashboard/staff': 'staff',
+        '/dashboard/complaints': 'complaints',
+        '/dashboard/sales-report': 'reports',
+        '/dashboard/profit-report': 'reports',
+        '/dashboard/expected-sales': 'reports',
+        '/dashboard/products': 'items',
+      };
+
+      const requiredPermission = pathPermissions[location.pathname];
+      if (requiredPermission && !user.permissions.includes(requiredPermission)) {
+        return <DashboardContent />;
+      }
+    }
     switch (location.pathname) {
       case '/items':
         return <Items />;
@@ -91,7 +124,7 @@ export default function Dashboard() {
         return <DashboardContent />;
     }
   };
-  
+
   return (
     <SidebarProvider>
       <div className="min-h-screen flex w-full">

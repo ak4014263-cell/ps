@@ -8,7 +8,6 @@ import { DesignerRightPanel } from './DesignerRightPanel';
 import { DesignerLayoutPanel } from './DesignerLayoutPanel';
 import { DesignerBackgroundPanel } from './DesignerBackgroundPanel';
 import { DesignerImagesPanel, PhotoShape } from './DesignerImagesPanel';
-import { DesignerExportPanel } from './DesignerExportPanel';
 import { DesignerCodeGenerator } from './DesignerCodeGenerator';
 import { DesignerSignatureField } from './DesignerSignatureField';
 import { DesignerContextMenu } from './DesignerContextMenu';
@@ -1196,6 +1195,35 @@ export function AdvancedTemplateDesigner({ editTemplate, onBack, projectId, proj
     updateObjectsList();
   }, [updateObjectsList]);
 
+  // Auto-fetch first data record for preview when component loads
+  useEffect(() => {
+    const fetchFirstRecord = async () => {
+      if (!projectId) return;
+
+      try {
+        const response = await apiService.dataRecordsAPI.getByProject(projectId, { limit: 1 });
+        if (response.data && response.data.length > 0) {
+          const firstRecord = response.data[0];
+          // Convert the first record to preview data format
+          const recordData: Record<string, string> = {};
+          Object.keys(firstRecord).forEach(key => {
+            if (firstRecord[key] !== null && firstRecord[key] !== undefined) {
+              recordData[key] = String(firstRecord[key]);
+            }
+          });
+          setPreviewData(recordData);
+          console.log('Auto-loaded first data record for preview:', recordData);
+        }
+      } catch (error) {
+        console.error('Failed to fetch first data record:', error);
+        // Don't show error toast - this is optional functionality
+      }
+    };
+
+    fetchFirstRecord();
+  }, [projectId]);
+
+
   /**
    * Safely clear a Fabric canvas only if its underlying context is available.
    * Prevents calling clear() when the canvas element/context has been removed,
@@ -1648,8 +1676,11 @@ export function AdvancedTemplateDesigner({ editTemplate, onBack, projectId, proj
     const originalText = text;
     const variableName = text.replace(/[{}]/g, '');
 
-    // Determine display text - ALWAYS use original field name, never preview data for boxes
-    let displayText = originalText; // Always show original placeholder like {{firstName}}
+    // Determine display text - use preview data if available, otherwise show field name
+    let displayText = originalText; // Default to {{firstName}}
+    if (previewData && previewData[variableName]) {
+      displayText = String(previewData[variableName]); // Show real data like "John Doe"
+    }
 
     // Calculate box dimensions
     const padding = 8;
@@ -1714,13 +1745,13 @@ export function AdvancedTemplateDesigner({ editTemplate, onBack, projectId, proj
       return;
     }
 
-    // Create rectangle background
+    // Create rectangle background with transparent fill
     const boxRect = new Rect({
       left: boxLeft,
       top: boxTop,
       width: boxWidth,
       height: boxHeight,
-      fill: '#ffffff',
+      fill: 'rgba(255, 255, 255, 0.1)', // Transparent background
       stroke: '#d1d5db',
       strokeWidth: 1,
       rx: 4,
@@ -1745,7 +1776,7 @@ export function AdvancedTemplateDesigner({ editTemplate, onBack, projectId, proj
       top: boxTop + padding,
       fontSize,
       fontFamily,
-      fill,
+      fill: fill || '#000000', // Ensure text has a visible color
       fontWeight: 'normal',
       editable: false, // Not directly editable, box is the container
       width: boxWidth - padding * 2,
@@ -1767,13 +1798,12 @@ export function AdvancedTemplateDesigner({ editTemplate, onBack, projectId, proj
       evented: false, // Text doesn't handle events, box does
       hasControls: false, // No resize handles on text
       hasBorders: false, // No border around text box
-      clipPath: new Rect({
-        left: 0,
-        top: 0,
-        width: boxWidth - padding * 2,
-        height: boxHeight - padding * 2,
-        absolutePositioned: true,
-      }), // Clip text to box boundaries
+      visible: true, // Ensure text is visible
+      borderColor: 'transparent', // No border color
+      borderScaleFactor: 0, // No border scaling
+      cornerColor: 'transparent', // No corner indicators
+      cornerSize: 0, // No corner size
+      transparentCorners: true, // Transparent corners
       data: {
         type: 'variable-text',
         field: variableName,
@@ -1814,9 +1844,12 @@ export function AdvancedTemplateDesigner({ editTemplate, onBack, projectId, proj
       mtr: true,
     });
 
-    // Add both to canvas
+    // Add both to canvas - text must be added after box to render on top
     activeCanvas.add(boxRect);
     activeCanvas.add(textbox);
+
+    // Ensure text renders on top of the box using Fabric.js v6 method
+    activeCanvas.bringObjectToFront(textbox);
 
     // Store original font size for reference
     const originalFontSize = fontSize;
@@ -2407,6 +2440,105 @@ export function AdvancedTemplateDesigner({ editTemplate, onBack, projectId, proj
     const objData = selectedObject.data;
     if (!objData?.isPhoto) return;
 
+    // If the object is an actual image, apply masking instead of replacing it
+    if (selectedObject.type === 'image') {
+      const width = selectedObject.width;
+      const height = selectedObject.height;
+      let clipPath;
+      const minDim = Math.min(width, height);
+
+      if (newShape === 'custom' && customMaskUrl) {
+        // Load mask image and apply as clipPath
+        FabricImage.fromURL(customMaskUrl, { crossOrigin: 'anonymous' }).then((maskImg) => {
+          if (maskImg.width && maskImg.height) {
+            const scale = Math.min(width / maskImg.width, height / maskImg.height);
+            maskImg.scale(scale);
+          }
+          maskImg.set({
+            originX: 'center',
+            originY: 'center',
+            left: 0,
+            top: 0
+          });
+          selectedObject.set('clipPath', maskImg);
+          selectedObject.set({ data: { ...selectedObject.data, shape: newShape, customMaskUrl } });
+          activeCanvas.requestRenderAll();
+          saveToHistory();
+          toast.success('Custom mask applied');
+        }).catch(err => {
+          console.error('Failed to load mask', err);
+          toast.error('Failed to load mask');
+        });
+        return;
+      }
+
+      switch (newShape) {
+        case 'circle':
+          clipPath = new Circle({
+            radius: minDim / 2,
+            originX: 'center',
+            originY: 'center',
+            left: 0, top: 0
+          });
+          break;
+        case 'ellipse':
+          clipPath = new Circle({
+            radius: width / 2,
+            scaleY: height / width,
+            originX: 'center',
+            originY: 'center',
+            left: 0, top: 0
+          });
+          break;
+        case 'rounded-rect':
+          clipPath = new Rect({
+            width: width,
+            height: height,
+            rx: Math.min(width, height) * 0.15,
+            ry: Math.min(width, height) * 0.15,
+            originX: 'center',
+            originY: 'center',
+            left: 0, top: 0
+          });
+          break;
+        case 'hexagon':
+          const hexPoints = createPolygonPoints(6, minDim / 2);
+          clipPath = new Polygon(hexPoints, { originX: 'center', originY: 'center', left: 0, top: 0 });
+          break;
+        case 'star':
+          const starPts = createStarPoints(5, minDim / 2, minDim / 4);
+          clipPath = new Polygon(starPts, { originX: 'center', originY: 'center', left: 0, top: 0 });
+          break;
+        case 'heart':
+          const heartPts = createHeartPoints(minDim / 2);
+          clipPath = new Polygon(heartPts, { originX: 'center', originY: 'center', left: 0, top: 0 });
+          break;
+        case 'octagon':
+          const octPts = createPolygonPoints(8, minDim / 2);
+          clipPath = new Polygon(octPts, { originX: 'center', originY: 'center', left: 0, top: 0 });
+          break;
+        case 'pentagon':
+          const pentPts = createPolygonPoints(5, minDim / 2);
+          clipPath = new Polygon(pentPts, { originX: 'center', originY: 'center', left: 0, top: 0 });
+          break;
+        case 'triangle':
+          const triPts = createPolygonPoints(3, minDim / 2);
+          clipPath = new Polygon(triPts, { originX: 'center', originY: 'center', left: 0, top: 0 });
+          break;
+        case 'rect':
+        default:
+          clipPath = null; // No clip path for rect (reset)
+          break;
+      }
+
+      selectedObject.set('clipPath', clipPath);
+      selectedObject.set({ data: { ...selectedObject.data, shape: newShape } });
+      activeCanvas.requestRenderAll();
+      saveToHistory();
+      toast.success(`Photo shape updated to ${newShape}`);
+      return;
+    }
+
     // Get current position and size
     const bounds = selectedObject.getBoundingRect();
     const left = selectedObject.left || 0;
@@ -2417,6 +2549,7 @@ export function AdvancedTemplateDesigner({ editTemplate, onBack, projectId, proj
     // Remove old object
     activeCanvas.remove(selectedObject);
 
+    // ... rest of logic for placeholders ...
     // Handle custom mask
     if (newShape === 'custom' && customMaskUrl) {
       FabricImage.fromURL(customMaskUrl, { crossOrigin: 'anonymous' }).then((img) => {
@@ -2444,6 +2577,7 @@ export function AdvancedTemplateDesigner({ editTemplate, onBack, projectId, proj
         toast.error('Failed to load custom mask image. Reverting to previous shape.');
         // Re-add the original object since we removed it
         activeCanvas.add(selectedObject);
+        // selectedObject might be stale, but in this scope it refers to the removed object
         activeCanvas.setActiveObject(selectedObject);
         activeCanvas.requestRenderAll();
       });
@@ -2547,6 +2681,17 @@ export function AdvancedTemplateDesigner({ editTemplate, onBack, projectId, proj
           strokeDashArray: [5, 5],
         });
         break;
+      case 'triangle':
+        const triPoints = createPolygonPoints(3, Math.min(currentWidth, currentHeight) / 2);
+        newObj = new Polygon(triPoints, {
+          left,
+          top,
+          fill: '#e5e7eb',
+          stroke: '#9ca3af',
+          strokeWidth: 2,
+          strokeDashArray: [5, 5],
+        });
+        break;
       case 'rect':
       default:
         newObj = new Rect({
@@ -2570,6 +2715,39 @@ export function AdvancedTemplateDesigner({ editTemplate, onBack, projectId, proj
     toast.success(`Photo shape changed to ${newShape}`);
   }, [selectedObject, activeCanvas]);
 
+  // Add Project Photo handler
+  const addProjectPhoto = useCallback((url: string) => {
+    if (!activeCanvas) return;
+
+    FabricImage.fromURL(url, { crossOrigin: 'anonymous' }).then((img) => {
+      const canvasWidth = activeCanvas.width || 800;
+      const canvasHeight = activeCanvas.height || 600;
+
+      // Resize if too big
+      const maxSize = Math.min(canvasWidth, canvasHeight) * 0.5;
+      if (img.width && img.height && (img.width > maxSize || img.height > maxSize)) {
+        const scale = Math.min(maxSize / img.width, maxSize / img.height);
+        img.scale(scale);
+      }
+
+      img.set({
+        left: canvasWidth / 2 - (img.width! * (img.scaleX || 1)) / 2,
+        top: canvasHeight / 2 - (img.height! * (img.scaleY || 1)) / 2,
+        data: { isPhoto: true, shape: 'rect' }
+      });
+
+      activeCanvas.add(img);
+      activeCanvas.setActiveObject(img);
+      activeCanvas.requestRenderAll();
+      saveToHistory();
+      toast.success('Project photo added');
+      setActiveTool('select');
+    }).catch(err => {
+      console.error('Failed to load project photo:', err);
+      toast.error('Failed to load photo');
+    });
+  }, [activeCanvas, saveToHistory]);
+
   /**
    * Deletes the selected object(s) from the canvas
    * Removes all active objects and clears selection
@@ -2590,16 +2768,6 @@ export function AdvancedTemplateDesigner({ editTemplate, onBack, projectId, proj
       return;
     }
 
-    // Get unscaled dimensions (clipPath scales with object)
-    // Actually clipPath is applied to the object.
-    // If we want the clipPath to match the object's visual bounds:
-    // With Fabric v6, clipPath is automatically transformed with the object if absolutePositioned is false (default).
-    // We should create the path relative to the object center (0,0).
-
-    // We use the object's width/height (unscaled) because clipPath scales with it?
-    // No, clipPath property is an object.
-    // If we want it to cover the object, we use object.width/height.
-
     const width = selectedObject.width;
     const height = selectedObject.height;
     const minDim = Math.min(width, height);
@@ -2612,6 +2780,27 @@ export function AdvancedTemplateDesigner({ editTemplate, onBack, projectId, proj
           radius: minDim / 2,
           originX: 'center',
           originY: 'center',
+          left: 0, top: 0
+        });
+        break;
+      case 'ellipse':
+        clipPath = new Circle({
+          radius: width / 2,
+          scaleY: height / width,
+          originX: 'center',
+          originY: 'center',
+          left: 0, top: 0
+        });
+        break;
+      case 'rounded-rect':
+        clipPath = new Rect({
+          width: width,
+          height: height,
+          rx: Math.min(width, height) * 0.15,
+          ry: Math.min(width, height) * 0.15,
+          originX: 'center',
+          originY: 'center',
+          left: 0, top: 0
         });
         break;
       case 'rect':
@@ -2620,38 +2809,41 @@ export function AdvancedTemplateDesigner({ editTemplate, onBack, projectId, proj
           height: height,
           originX: 'center',
           originY: 'center',
+          left: 0, top: 0
         });
         break;
       case 'star':
-        // Generate star points relative to center
-        // Basic 5-point star
-        const outerRadius = minDim / 2;
-        const innerRadius = minDim / 4;
-        const points = [];
-        for (let i = 0; i < 5; i++) {
-          const angle = (i * 4 * Math.PI) / 10 - Math.PI / 2;
-          points.push({
-            x: Math.cos(angle) * outerRadius,
-            y: Math.sin(angle) * outerRadius
-          });
-          const angleInner = ((i * 4 + 2) * Math.PI) / 10 - Math.PI / 2;
-          points.push({
-            x: Math.cos(angleInner) * innerRadius,
-            y: Math.sin(angleInner) * innerRadius
-          });
-        }
-        clipPath = new Polygon(points, {
-          originX: 'center',
-          originY: 'center',
-        });
+        const starPts = createStarPoints(5, minDim / 2, minDim / 4);
+        clipPath = new Polygon(starPts, { originX: 'center', originY: 'center', left: 0, top: 0 });
         break;
       case 'heart':
-        // Simplified heart path if needed, or omit
+        const heartPts = createHeartPoints(minDim / 2);
+        clipPath = new Polygon(heartPts, { originX: 'center', originY: 'center', left: 0, top: 0 });
+        break;
+      case 'hexagon':
+        const hexPoints = createPolygonPoints(6, minDim / 2);
+        clipPath = new Polygon(hexPoints, { originX: 'center', originY: 'center', left: 0, top: 0 });
+        break;
+      case 'octagon':
+        const octPoints = createPolygonPoints(8, minDim / 2);
+        clipPath = new Polygon(octPoints, { originX: 'center', originY: 'center', left: 0, top: 0 });
+        break;
+      case 'pentagon':
+        const pentPoints = createPolygonPoints(5, minDim / 2);
+        clipPath = new Polygon(pentPoints, { originX: 'center', originY: 'center', left: 0, top: 0 });
+        break;
+      case 'triangle':
+        const triPoints = createPolygonPoints(3, minDim / 2);
+        clipPath = new Polygon(triPoints, { originX: 'center', originY: 'center', left: 0, top: 0 });
         break;
     }
 
     if (clipPath) {
       selectedObject.set('clipPath', clipPath);
+      // Determine if we should tag the object as a specific shape in data
+      if (!selectedObject.data) selectedObject.data = {};
+      selectedObject.data.shape = shape;
+
       activeCanvas.requestRenderAll();
       saveToHistory();
       toast.success(`Applied ${shape} mask`);
@@ -3237,101 +3429,332 @@ export function AdvancedTemplateDesigner({ editTemplate, onBack, projectId, proj
    */
   // Data preview handlers
   const handlePreviewData = useCallback((data: Record<string, string>) => {
-    if (!activeCanvas) return;
+    if (!fabricCanvas) return;
     setPreviewData(data);
 
-    // First, remove any existing preview images to replace them with new ones
-    const existingPreviewImages = activeCanvas.getObjects().filter((o: any) => o?.data?.type === 'preview-photo');
-    existingPreviewImages.forEach((img: any) => {
-      const placeholderObj = img.data?.previewForObject;
-      try {
-        activeCanvas.remove(img);
-      } catch (e) { }
-      // Re-add the placeholder for re-processing
-      if (placeholderObj) {
+    const applyToCanvas = (canvas: FabricCanvas | null) => {
+      if (!canvas) return;
+
+      // First, remove any existing preview images to replace them with new ones
+      const existingPreviewImages = canvas.getObjects().filter((o: any) => o?.data?.type === 'preview-photo');
+      existingPreviewImages.forEach((img: any) => {
+        const placeholderObj = img.data?.previewForObject;
         try {
-          activeCanvas.add(placeholderObj);
-          if (placeholderObj.data) delete placeholderObj.data.previewImageAdded;
+          canvas.remove(img);
         } catch (e) { }
-      }
-    });
+        // Re-add the placeholder for re-processing
+        if (placeholderObj) {
+          try {
+            canvas.add(placeholderObj);
+            if (placeholderObj.data) delete placeholderObj.data.previewImageAdded;
+          } catch (e) { }
+        }
+      });
 
-    // Replace variable text with preview data
-    activeCanvas.getObjects().forEach((obj: any) => {
-      // Handle photo variable placeholders: load image preview and replace placeholder
-      if (obj.data?.type === 'variable' && obj.data?.isPhoto && obj.data?.field) {
-        const fieldName = obj.data.field;
-        const url = data[fieldName];
-        if (url && !obj.data.previewImageAdded) {
-          // Try direct load first, fallback to fetch->blob if CORS blocks
-          FabricImage.fromURL(url, { crossOrigin: 'anonymous' }).then((img) => {
-            try {
-              const bounds = obj.getBoundingRect();
-              const targetWidth = bounds.width / (activeCanvas.getZoom() || 1);
-              const targetHeight = bounds.height / (activeCanvas.getZoom() || 1);
-              if (img.width && img.height) {
-                // Scale to cover the placeholder area
-                const scale = Math.max(targetWidth / img.width, targetHeight / img.height);
-                img.scale(scale);
-              }
-              img.set({
-                left: obj.left,
-                top: obj.top,
-                selectable: false,
-                evented: false,
-                data: { type: 'preview-photo', field: fieldName, previewForObject: obj },
-              });
+      // Replace variable text and photos with preview data
+      canvas.getObjects().forEach((obj: any) => {
+        // Handle photo variable placeholders: load image preview and replace placeholder
+        if (obj.data?.type === 'variable' && (obj.data?.isPhoto || obj.data?.field?.toLowerCase().includes('photo')) && obj.data?.field) {
+          const fieldName = obj.data.field;
 
-              // Remove placeholder from canvas and add preview image
-              activeCanvas.remove(obj);
-              activeCanvas.add(img);
-              obj.data.previewImageAdded = true;
-              activeCanvas.requestRenderAll();
-            } catch (err) {
-              console.error('Error applying preview photo:', err);
+          // Try exact match first
+          let url = data[fieldName];
+
+          // If not found, try case-insensitive match
+          if (!url) {
+            const matchingKey = Object.keys(data).find(key => key.toLowerCase() === fieldName.toLowerCase());
+            if (matchingKey) url = data[matchingKey];
+          }
+
+          // If field is generic 'photo', try common variations
+          if (!url && fieldName.toLowerCase() === 'photo') {
+            const commonKeys = ['image', 'picture', 'profile_picture', 'photo_url', 'img', 'cropped_photo_url', 'school_id_url'];
+            const matchingKey = Object.keys(data).find(key => commonKeys.includes(key.toLowerCase()));
+            if (matchingKey) url = data[matchingKey];
+          }
+
+          // Normalize URL if it's a relative path (common with proxied uploads)
+          if (url && typeof url === 'string' && !url.startsWith('http') && !url.startsWith('data:') && !url.startsWith('blob:')) {
+            if (!url.startsWith('/')) {
+              url = '/' + url;
             }
-          }).catch(async () => {
-            try {
-              const resp = await fetch(url);
-              if (!resp.ok) throw new Error('fetch failed');
-              const blob = await resp.blob();
-              const objectUrl = URL.createObjectURL(blob);
-              FabricImage.fromURL(objectUrl, { crossOrigin: 'anonymous' }).then((img) => {
+          }
+
+          if (url && !obj.data.previewImageAdded) {
+            // Try direct load first, fallback to fetch->blob if CORS blocks
+            FabricImage.fromURL(url, { crossOrigin: 'anonymous' }).then((img) => {
+              try {
                 const bounds = obj.getBoundingRect();
-                const targetWidth = bounds.width / (activeCanvas.getZoom() || 1);
-                const targetHeight = bounds.height / (activeCanvas.getZoom() || 1);
+                const targetWidth = bounds.width / (canvas.getZoom() || 1);
+                const targetHeight = bounds.height / (canvas.getZoom() || 1);
                 if (img.width && img.height) {
+                  // Scale to cover the placeholder area
                   const scale = Math.max(targetWidth / img.width, targetHeight / img.height);
                   img.scale(scale);
                 }
+
+                // Apply clipping based on placeholder shape
+                const shape = obj.data.shape || 'rect';
+                let clipPath;
+                const minDim = Math.min(targetWidth, targetHeight);
+                const width = targetWidth;
+                const height = targetHeight;
+
+                switch (shape) {
+                  case 'circle':
+                    clipPath = new Circle({
+                      radius: minDim / 2,
+                      originX: 'center',
+                      originY: 'center',
+                      left: 0, top: 0
+                    });
+                    break;
+                  case 'ellipse':
+                    clipPath = new Circle({
+                      radius: width / 2,
+                      scaleY: height / width,
+                      originX: 'center',
+                      originY: 'center',
+                      left: 0, top: 0
+                    });
+                    break;
+                  case 'rounded-rect':
+                    clipPath = new Rect({
+                      width: width,
+                      height: height,
+                      rx: Math.min(width, height) * 0.15,
+                      ry: Math.min(width, height) * 0.15,
+                      originX: 'center',
+                      originY: 'center',
+                      left: 0, top: 0
+                    });
+                    break;
+                  case 'hexagon':
+                    clipPath = new Polygon(createPolygonPoints(6, minDim / 2), {
+                      originX: 'center',
+                      originY: 'center',
+                      left: 0, top: 0
+                    });
+                    break;
+                  case 'star':
+                    clipPath = new Polygon(createStarPoints(5, minDim / 2, minDim / 4), {
+                      originX: 'center',
+                      originY: 'center',
+                      left: 0, top: 0
+                    });
+                    break;
+                  case 'heart':
+                    clipPath = new Polygon(createHeartPoints(minDim / 2), {
+                      originX: 'center',
+                      originY: 'center',
+                      left: 0, top: 0
+                    });
+                    break;
+                  case 'octagon':
+                    clipPath = new Polygon(createPolygonPoints(8, minDim / 2), {
+                      originX: 'center',
+                      originY: 'center',
+                      left: 0, top: 0
+                    });
+                    break;
+                  case 'pentagon':
+                    clipPath = new Polygon(createPolygonPoints(5, minDim / 2), {
+                      originX: 'center',
+                      originY: 'center',
+                      left: 0, top: 0
+                    });
+                    break;
+                  case 'triangle':
+                    const triPts = createPolygonPoints(3, minDim / 2);
+                    clipPath = new Polygon(triPts, { originX: 'center', originY: 'center', left: 0, top: 0 });
+                    break;
+                  case 'rect':
+                  default:
+                    // No extra clip needed for rect if we just follow the bounds, but for consistency:
+                    clipPath = new Rect({
+                      width: width,
+                      height: height,
+                      originX: 'center',
+                      originY: 'center',
+                      left: 0, top: 0
+                    });
+                    break;
+                }
+
+                if (clipPath) {
+                  img.set('clipPath', clipPath);
+                }
+
                 img.set({
                   left: obj.left,
                   top: obj.top,
+                  angle: obj.angle,
+                  originX: obj.originX,
+                  originY: obj.originY,
+                  data: {
+                    type: 'preview-photo',
+                    field: fieldName,
+                    previewForObject: obj,
+                  },
                   selectable: false,
                   evented: false,
-                  data: { type: 'preview-photo', field: fieldName, previewForObject: obj },
                 });
-                activeCanvas.remove(obj);
-                activeCanvas.add(img);
+
+                canvas.remove(obj);
+                canvas.add(img);
+                canvas.moveObjectTo(img, 0); // Move to bottom so it doesn't cover other elements
                 obj.data.previewImageAdded = true;
-                setTimeout(() => { try { URL.revokeObjectURL(objectUrl); } catch (e) { } }, 2000);
-                activeCanvas.requestRenderAll();
-              }).catch((e) => {
-                console.error('Failed to load preview image from blob URL', e);
-              });
-            } catch (e) {
-              console.error('Failed to fetch preview image', e);
-            }
-          });
-        }
-        return; // skip other handlers for photo placeholders
-      }
-      // Handle variable boxes (rectangles with text inside)
-      if (obj.data?.type === 'variable-box' && obj.data?.field) {
-        const fieldName = obj.data.field;
-        if (data[fieldName]) {
+                canvas.requestRenderAll();
+              } catch (e) {
+                console.warn(`Error processing preview image for ${url}`, e);
+              }
+            }).catch(async () => {
+              try {
+                const resp = await fetch(url);
+                if (!resp.ok) throw new Error(`Fetch failed: ${resp.status}`);
+                const contentType = resp.headers.get('content-type');
+                if (contentType && !contentType.startsWith('image/')) {
+                  throw new Error(`Invalid content type: ${contentType}`);
+                }
+                const blob = await resp.blob();
+                const objectUrl = URL.createObjectURL(blob);
+                FabricImage.fromURL(objectUrl, { crossOrigin: 'anonymous' }).then((img) => {
+                  const bounds = obj.getBoundingRect();
+                  const targetWidth = bounds.width / (canvas.getZoom() || 1);
+                  const targetHeight = bounds.height / (canvas.getZoom() || 1);
+                  if (img.width && img.height) {
+                    const scale = Math.max(targetWidth / img.width, targetHeight / img.height);
+                    img.scale(scale);
+                  }
+
+                  // Apply clipping based on placeholder shape
+                  const shape = obj.data.shape || 'rect';
+                  let clipPath;
+                  const minDim = Math.min(targetWidth, targetHeight);
+                  const width = targetWidth;
+                  const height = targetHeight;
+
+                  switch (shape) {
+                    case 'circle':
+                      clipPath = new Circle({
+                        radius: minDim / 2,
+                        originX: 'center',
+                        originY: 'center',
+                        left: 0, top: 0
+                      });
+                      break;
+                    case 'ellipse':
+                      clipPath = new Circle({
+                        radius: width / 2,
+                        scaleY: height / width,
+                        originX: 'center',
+                        originY: 'center',
+                        left: 0, top: 0
+                      });
+                      break;
+                    case 'rounded-rect':
+                      clipPath = new Rect({
+                        width: width,
+                        height: height,
+                        rx: Math.min(width, height) * 0.15,
+                        ry: Math.min(width, height) * 0.15,
+                        originX: 'center',
+                        originY: 'center',
+                        left: 0, top: 0
+                      });
+                      break;
+                    case 'hexagon':
+                      clipPath = new Polygon(createPolygonPoints(6, minDim / 2), {
+                        originX: 'center',
+                        originY: 'center',
+                        left: 0, top: 0
+                      });
+                      break;
+                    case 'star':
+                      clipPath = new Polygon(createStarPoints(5, minDim / 2, minDim / 4), {
+                        originX: 'center',
+                        originY: 'center',
+                        left: 0, top: 0
+                      });
+                      break;
+                    case 'heart':
+                      clipPath = new Polygon(createHeartPoints(minDim / 2), {
+                        originX: 'center',
+                        originY: 'center',
+                        left: 0, top: 0
+                      });
+                      break;
+                    case 'octagon':
+                      clipPath = new Polygon(createPolygonPoints(8, minDim / 2), {
+                        originX: 'center',
+                        originY: 'center',
+                        left: 0, top: 0
+                      });
+                      break;
+                    case 'pentagon':
+                      clipPath = new Polygon(createPolygonPoints(5, minDim / 2), {
+                        originX: 'center',
+                        originY: 'center',
+                        left: 0, top: 0
+                      });
+                      break;
+                    case 'triangle':
+                      const triPts = createPolygonPoints(3, minDim / 2);
+                      clipPath = new Polygon(triPts, { originX: 'center', originY: 'center', left: 0, top: 0 });
+                      break;
+                    case 'rect':
+                    default:
+                      // No extra clip needed for rect if we just follow the bounds, but for consistency:
+                      clipPath = new Rect({
+                        width: width,
+                        height: height,
+                        originX: 'center',
+                        originY: 'center',
+                        left: 0, top: 0
+                      });
+                      break;
+                  }
+
+                  if (clipPath) {
+                    img.set('clipPath', clipPath);
+                  }
+
+                  img.set({
+                    left: obj.left,
+                    top: obj.top,
+                    angle: obj.angle,
+                    originX: obj.originX,
+                    originY: obj.originY,
+                    data: {
+                      type: 'preview-photo',
+                      field: fieldName,
+                      previewForObject: obj,
+                    },
+                    selectable: false,
+                    evented: false,
+                  });
+
+                  canvas.remove(obj);
+                  canvas.add(img);
+                  canvas.moveObjectTo(img, 0);
+                  obj.data.previewImageAdded = true;
+                  canvas.requestRenderAll();
+
+                  // Revoke object URL after a delay to ensure it's loaded
+                  setTimeout(() => URL.revokeObjectURL(objectUrl), 2000);
+                }).catch((e) => {
+                  console.warn(`Failed to load preview image from blob URL for ${url}`, e);
+                  URL.revokeObjectURL(objectUrl);
+                });
+              } catch (e) {
+                console.warn(`Failed to fetch preview image: ${url}`, e);
+              }
+            });
+          }
+        } else if (obj.data?.type === 'variable-box' && obj.data?.field) {
+          const fieldName = obj.data.field;
           // Find the associated text object
-          const textObj = activeCanvas.getObjects().find((o: any) =>
+          const textObj = canvas.getObjects().find((o: any) =>
             o.data?.type === 'variable-text' &&
             o.data?.field === fieldName &&
             o.data?.parentBox === obj
@@ -3347,7 +3770,7 @@ export function AdvancedTemplateDesigner({ editTemplate, onBack, projectId, proj
               (textObj as any).data.originalFontSize = (textObj as any).fontSize;
             }
 
-            let displayText = String(data[fieldName]);
+            let displayText = String(data[fieldName] || data[Object.keys(data).find(k => k.toLowerCase() === fieldName.toLowerCase()) || ''] || '');
 
             // Apply text case transformation if set
             if ((textObj as any).data?.textCase === 'uppercase') {
@@ -3361,40 +3784,45 @@ export function AdvancedTemplateDesigner({ editTemplate, onBack, projectId, proj
             }
 
             textObj.set('text', displayText);
-            activeCanvas.requestRenderAll();
+            canvas.requestRenderAll();
           }
-        }
-      } else if (obj.type === 'textbox' && obj.text) {
-        // Handle regular variable text fields
-        // Store original text and font size if not already stored
-        if (!obj.data) obj.data = {};
-        if (!obj.data.originalText) {
-          obj.data.originalText = obj.text;
-        }
-        if (!obj.data.originalFontSize) {
-          obj.data.originalFontSize = obj.fontSize;
-        }
+        } else if (obj.type === 'textbox' && obj.text) {
+          // Handle regular variable text fields
+          // Store original text and font size if not already stored
+          if (!obj.data) obj.data = {};
+          if (!obj.data.originalText) {
+            obj.data.originalText = obj.text;
+          }
+          if (!obj.data.originalFontSize) {
+            obj.data.originalFontSize = obj.fontSize;
+          }
 
-        // Replace variables with data (escape keys so special chars don't break RegExp)
-        let newText = obj.data.originalText;
-        Object.entries(data).forEach(([key, value]) => {
-          const escaped = escapeRegExp(key);
-          newText = newText.replace(new RegExp(`\\{\\{${escaped}\\}\\}`, 'g'), String(value));
-        });
+          // Replace variables with data (escape keys so special chars don't break RegExp)
+          let newText = obj.data.originalText;
+          Object.entries(data).forEach(([key, value]) => {
+            const escaped = escapeRegExp(key);
+            newText = newText.replace(new RegExp(`\\{\\{${escaped}\\}\\}`, 'g'), String(value));
+          });
 
-        // Apply auto font size if enabled
-        if (obj.data?.autoFontSize) {
-          const maxWidth = (obj.width || 100) * (obj.scaleX || 1);
-          const maxHeight = (obj.height || 30) * (obj.scaleY || 1);
-          const optimalFontSize = calculateAutoFontSize(obj, newText, maxWidth, maxHeight);
-          obj.set('fontSize', optimalFontSize);
+          // Apply auto font size if enabled
+          if (obj.data?.autoFontSize) {
+            const maxWidth = (obj.width || 100) * (obj.scaleX || 1);
+            const maxHeight = (obj.height || 30) * (obj.scaleY || 1);
+            const optimalFontSize = calculateAutoFontSize(obj, newText, maxWidth, maxHeight);
+            obj.set('fontSize', optimalFontSize);
+          }
+
+          obj.set('text', newText);
         }
+      });
+      canvas.requestRenderAll();
+    };
 
-        obj.set('text', newText);
-      }
-    });
-    activeCanvas.requestRenderAll();
-  }, [activeCanvas, calculateAutoFontSize]);
+    applyToCanvas(fabricCanvas);
+    if (hasBackSide) {
+      applyToCanvas(backFabricCanvas);
+    }
+  }, [fabricCanvas, backFabricCanvas, hasBackSide, calculateAutoFontSize]);
 
   /**
    * Resets preview mode by restoring original variable text and font sizes
@@ -4268,7 +4696,7 @@ export function AdvancedTemplateDesigner({ editTemplate, onBack, projectId, proj
 
         {/* Floating Panels */}
         {activeSidebarTab === 'elements' && (
-          <DesignerElementsPanel onAddShape={addShape} onAddText={addText} onAddImage={addImage} onAddPlaceholder={addPlaceholder} onClose={() => setActiveSidebarTab(null)} />
+          <DesignerElementsPanel onAddShape={addShape} onAddText={addText} onAddImage={addImage} onAddPlaceholder={addPlaceholder} onClose={() => setActiveSidebarTab(null)} detectedVariables={detectedVariables} />
         )}
         {activeSidebarTab === 'layout' && (
           <DesignerLayoutPanel widthMm={widthMm} heightMm={heightMm} onWidthChange={setWidthMm} onHeightChange={setHeightMm} marginTop={marginTop} marginLeft={marginLeft} marginRight={marginRight} marginBottom={marginBottom} onMarginTopChange={setMarginTop} onMarginLeftChange={setMarginLeft} onMarginRightChange={setMarginRight} onMarginBottomChange={setMarginBottom} category={category} onCategoryChange={setCategory} snapToGrid={snapToGrid} onSnapToGridChange={setSnapToGrid} gridSize={gridSize} onGridSizeChange={setGridSize} bleedMm={bleedMm} onBleedChange={setBleedMm} safeZoneMm={safeZoneMm} onSafeZoneChange={setSafeZoneMm} onClose={() => setActiveSidebarTab(null)} />
@@ -4277,7 +4705,7 @@ export function AdvancedTemplateDesigner({ editTemplate, onBack, projectId, proj
           <DesignerBackgroundPanel backgroundColor={backgroundColor} onBackgroundColorChange={handleBackgroundColorChange} onBackgroundGradientChange={handleBackgroundGradientChange} onRemoveBackgroundGradient={handleRemoveBackgroundGradient} onBackgroundImageChange={handleBackgroundImageChange} onRemoveBackgroundImage={handleRemoveBackgroundImage} hasBackgroundImage={hasBackgroundImage} onClose={() => setActiveSidebarTab(null)} />
         )}
         {activeSidebarTab === 'images' && (
-          <DesignerImagesPanel onAddImage={addImage} onAddPlaceholder={addPlaceholder} onAddCustomShape={handleAddCustomShape} onAddCustomFont={handleAddCustomFont} onUseCustomShape={addCustomShapeToCanvas} onChangePhotoShape={changePhotoPlaceholderShape} onUpdatePhotoBorder={() => { saveToHistory(); updateObjectsList(); }} customShapes={customShapes} libraryShapes={libraryShapes.map((s: any) => ({ name: s.name, url: s.shape_url }))} customFonts={customFonts} selectedObject={selectedObject} canvas={activeCanvas} onClose={() => setActiveSidebarTab(null)} />
+          <DesignerImagesPanel onAddImage={addImage} onAddPlaceholder={addPlaceholder} onAddCustomShape={handleAddCustomShape} onAddCustomFont={handleAddCustomFont} onUseCustomShape={addCustomShapeToCanvas} onChangePhotoShape={changePhotoPlaceholderShape} onUpdatePhotoBorder={() => { saveToHistory(); updateObjectsList(); }} customShapes={customShapes} libraryShapes={libraryShapes.map((s: any) => ({ name: s.name, url: s.shape_url }))} customFonts={customFonts} selectedObject={selectedObject} canvas={activeCanvas} onClose={() => setActiveSidebarTab(null)} projectId={projectId} onAddProjectPhoto={addProjectPhoto} />
         )}
         {activeSidebarTab === 'data' && (
           <DesignerDataPreviewPanel

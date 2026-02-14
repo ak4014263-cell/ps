@@ -969,8 +969,15 @@ export const complaintsAPI = {
     return response.json();
   },
 
-  async getAll(params = {}) {
-    const query = new URLSearchParams(params as any).toString();
+  async getAll(params: any = {}) {
+    const cleanParams: any = {};
+    Object.keys(params).forEach(key => {
+      if (params[key] !== undefined && params[key] !== null) {
+        cleanParams[key] = params[key];
+      }
+    });
+
+    const query = new URLSearchParams(cleanParams).toString();
     const response = await fetch(`${API_URL}/complaints?${query}`);
     if (!response.ok) throw new Error('Failed to fetch complaints');
     return response.json();

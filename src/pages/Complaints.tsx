@@ -24,22 +24,42 @@ export default function Complaints() {
   const { isSuperAdmin } = useUserRole();
   const [searchQuery, setSearchQuery] = useState('');
 
+  const { data: vendorData } = useQuery({
+    queryKey: ['vendor', user?.id],
+    queryFn: async () => {
+      if (!user?.id) return null;
+      try {
+        const response = await apiService.profilesAPI.getById(user.id);
+        const profile = response.data || response;
+        return {
+          ...profile,
+          id: profile?.vendor_id || (typeof user?.vendor === 'object' ? user.vendor.id : user?.vendor) || 'default-vendor'
+        };
+      } catch (error) {
+        return {
+          id: (typeof user?.vendor === 'object' ? user.vendor.id : user?.vendor) || 'default-vendor'
+        };
+      }
+    },
+    enabled: !!user?.id,
+  });
+
   const { data: complaintsData, isLoading } = useQuery({
-    queryKey: ['complaints', user?.id, searchQuery],
+    queryKey: ['complaints', vendorData?.id, searchQuery],
     queryFn: async () => {
       if (!user?.id) return [];
 
       const params: any = {
         keyword: searchQuery || undefined
       };
-      if (!isSuperAdmin) {
-        params.vendor_id = user.id;
+      if (!isSuperAdmin && vendorData?.id) {
+        params.vendor_id = vendorData.id;
       }
 
       const response = await apiService.complaintsAPI.getAll(params);
       return (response.data || response || []);
     },
-    enabled: !!user?.id,
+    enabled: !!user?.id && (isSuperAdmin || !!vendorData),
   });
 
   const complaints = complaintsData || [];

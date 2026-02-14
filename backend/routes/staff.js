@@ -14,12 +14,12 @@ const router = express.Router();
  * Body: { email, password, fullName, phone, role, vendorId }
  */
 router.post('/', async (req, res) => {
-  const { email, password, fullName, phone, role, vendorId } = req.body;
+  const { email, password, fullName, phone, role, vendorId, permissions } = req.body;
 
   if (!email || !password || !fullName || !role) {
-    return res.status(400).json({ 
-      success: false, 
-      error: 'Missing required fields: email, password, fullName, role' 
+    return res.status(400).json({
+      success: false,
+      error: 'Missing required fields: email, password, fullName, role'
     });
   }
 
@@ -39,10 +39,10 @@ router.post('/', async (req, res) => {
     // 1. Create profile
     const profileId = crypto.randomUUID();
     const profileQuery = `
-      INSERT INTO profiles (id, full_name, email, phone)
-      VALUES (?, ?, ?, ?)
+      INSERT INTO profiles (id, full_name, email, phone, vendor_id)
+      VALUES (?, ?, ?, ?, ?)
     `;
-    await execute(profileQuery, [profileId, fullName, email, phone || null]);
+    await execute(profileQuery, [profileId, fullName, email, phone || null, vendorId || null]);
 
     // 2. Hash password
     const passwordHash = crypto
@@ -58,20 +58,22 @@ router.post('/', async (req, res) => {
     await execute(credQuery, [profileId, passwordHash]);
 
     // 4. Assign role
+    const roleId = crypto.randomUUID();
     const roleQuery = `
-      INSERT INTO user_roles (user_id, role)
-      VALUES (?, ?)
+      INSERT INTO user_roles (id, user_id, role)
+      VALUES (?, ?, ?)
     `;
-    await execute(roleQuery, [profileId, role]);
+    await execute(roleQuery, [roleId, profileId, role]);
 
     // 5. If vendorId provided, create vendor_staff record
     if (vendorId) {
       const staffId = crypto.randomUUID();
       const vendorStaffQuery = `
-        INSERT INTO vendor_staff (id, user_id, vendor_id, role)
-        VALUES (?, ?, ?, ?)
+        INSERT INTO vendor_staff (id, user_id, vendor_id, role, permissions)
+        VALUES (?, ?, ?, ?, ?)
       `;
-      await execute(vendorStaffQuery, [staffId, profileId, vendorId, role]);
+      const permissionsStr = permissions ? JSON.stringify(permissions) : null;
+      await execute(vendorStaffQuery, [staffId, profileId, vendorId, role, permissionsStr]);
     }
 
     res.json({
@@ -87,9 +89,9 @@ router.post('/', async (req, res) => {
     });
   } catch (error) {
     console.error('Staff creation error:', error);
-    res.status(500).json({ 
-      success: false, 
-      error: error.message || 'Failed to create staff' 
+    res.status(500).json({
+      success: false,
+      error: error.message || 'Failed to create staff'
     });
   }
 });
@@ -106,7 +108,8 @@ router.get('/', async (req, res) => {
         p.email,
         p.phone,
         ur.role,
-        vs.vendor_id
+        vs.vendor_id,
+        vs.permissions
       FROM profiles p
       LEFT JOIN user_roles ur ON p.id = ur.user_id
       LEFT JOIN vendor_staff vs ON p.id = vs.user_id
@@ -121,9 +124,9 @@ router.get('/', async (req, res) => {
     });
   } catch (error) {
     console.error('Staff fetch error:', error);
-    res.status(500).json({ 
-      success: false, 
-      error: error.message || 'Failed to fetch staff' 
+    res.status(500).json({
+      success: false,
+      error: error.message || 'Failed to fetch staff'
     });
   }
 });
@@ -142,7 +145,8 @@ router.get('/vendor/:vendorId', async (req, res) => {
         p.email,
         p.phone,
         ur.role,
-        vs.vendor_id
+        vs.vendor_id,
+        vs.permissions
       FROM profiles p
       LEFT JOIN user_roles ur ON p.id = ur.user_id
       LEFT JOIN vendor_staff vs ON p.id = vs.user_id
@@ -157,9 +161,9 @@ router.get('/vendor/:vendorId', async (req, res) => {
     });
   } catch (error) {
     console.error('Vendor staff fetch error:', error);
-    res.status(500).json({ 
-      success: false, 
-      error: error.message || 'Failed to fetch vendor staff' 
+    res.status(500).json({
+      success: false,
+      error: error.message || 'Failed to fetch vendor staff'
     });
   }
 });
@@ -178,18 +182,19 @@ router.get('/:id', async (req, res) => {
         p.email,
         p.phone,
         ur.role,
-        vs.vendor_id
+        vs.vendor_id,
+        vs.permissions
       FROM profiles p
       LEFT JOIN user_roles ur ON p.id = ur.user_id
       LEFT JOIN vendor_staff vs ON p.id = vs.user_id
       WHERE p.id = ?
     `;
     const staff = await getOne(queryStr, [id]);
-    
+
     if (!staff) {
-      return res.status(404).json({ 
-        success: false, 
-        error: 'Staff not found' 
+      return res.status(404).json({
+        success: false,
+        error: 'Staff not found'
       });
     }
 
@@ -199,9 +204,9 @@ router.get('/:id', async (req, res) => {
     });
   } catch (error) {
     console.error('Staff fetch error:', error);
-    res.status(500).json({ 
-      success: false, 
-      error: error.message || 'Failed to fetch staff' 
+    res.status(500).json({
+      success: false,
+      error: error.message || 'Failed to fetch staff'
     });
   }
 });
@@ -211,7 +216,7 @@ router.get('/:id', async (req, res) => {
  */
 router.put('/:id', async (req, res) => {
   const { id } = req.params;
-  const { fullName, phone, role, vendorId } = req.body;
+  const { fullName, phone, role, vendorId, permissions } = req.body;
 
   try {
     // Update profile
@@ -239,14 +244,17 @@ router.put('/:id', async (req, res) => {
     if (vendorId) {
       const checkQuery = `SELECT COUNT(*) as count FROM vendor_staff WHERE user_id = ?`;
       const [result] = await query(checkQuery, [id]);
-      
+
       if (result.count > 0) {
         const updateQuery = `
           UPDATE vendor_staff 
-          SET vendor_id = ?, role = COALESCE(?, role)
+          SET vendor_id = ?, 
+              role = COALESCE(?, role),
+              permissions = COALESCE(?, permissions)
           WHERE user_id = ?
         `;
-        await execute(updateQuery, [vendorId, role || null, id]);
+        const permissionsStr = permissions ? JSON.stringify(permissions) : null;
+        await execute(updateQuery, [vendorId, role || null, permissionsStr, id]);
       } else {
         const staffId = crypto.randomUUID();
         const insertQuery = `
@@ -263,9 +271,9 @@ router.put('/:id', async (req, res) => {
     });
   } catch (error) {
     console.error('Staff update error:', error);
-    res.status(500).json({ 
-      success: false, 
-      error: error.message || 'Failed to update staff' 
+    res.status(500).json({
+      success: false,
+      error: error.message || 'Failed to update staff'
     });
   }
 });
@@ -295,9 +303,9 @@ router.delete('/:id', async (req, res) => {
     });
   } catch (error) {
     console.error('Staff deletion error:', error);
-    res.status(500).json({ 
-      success: false, 
-      error: error.message || 'Failed to delete staff' 
+    res.status(500).json({
+      success: false,
+      error: error.message || 'Failed to delete staff'
     });
   }
 });

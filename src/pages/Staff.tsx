@@ -5,6 +5,7 @@ import { useAuth } from '@/hooks/useAuth';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
+import { Checkbox } from '@/components/ui/checkbox';
 import {
   Table,
   TableBody,
@@ -28,8 +29,21 @@ import {
   SelectValue,
 } from '@/components/ui/select';
 import { Badge } from '@/components/ui/badge';
-import { Plus, Edit2, Trash2 } from 'lucide-react';
+import { Plus, Edit2, Trash2, Shield } from 'lucide-react';
 import { toast } from 'sonner';
+
+const AVAILABLE_PERMISSIONS = [
+  { id: 'dashboard', label: 'Home/Dashboard' },
+  { id: 'items', label: 'Items' },
+  { id: 'clients', label: 'Clients' },
+  { id: 'projects', label: 'Projects' },
+  { id: 'tasks', label: 'Project Tasks' },
+  { id: 'staff', label: 'Staff Management' },
+  { id: 'transactions', label: 'Transactions' },
+  { id: 'print_orders', label: 'Print Orders' },
+  { id: 'complaints', label: 'Complaints' },
+  { id: 'reports', label: 'Reports' },
+];
 
 export default function Staff() {
   const { user } = useAuth();
@@ -41,7 +55,9 @@ export default function Staff() {
     full_name: '',
     email: '',
     phone: '',
+    password: '',
     role: 'vendor_staff',
+    permissions: [] as string[],
   });
 
   const { data: vendorData } = useQuery({
@@ -51,16 +67,23 @@ export default function Staff() {
       try {
         const response = await apiService.profilesAPI.getById(user.id);
         const profile = response.data || response;
-        // Profile should have vendor_id or we use user.vendor from auth
+
+        const vendorId = profile?.vendor_id ||
+          user?.vendor_id ||
+          (typeof user?.vendor === 'object' ? user.vendor.id : user?.vendor) ||
+          'default-vendor';
+
         return {
-          id: profile?.vendor_id || user?.vendor_id || user?.vendor || 'default-vendor',
-          ...profile
+          ...profile,
+          id: vendorId,
         };
       } catch (error) {
         console.error('Failed to fetch vendor:', error);
-        // Return a default vendor object
+        const vendorId = user?.vendor_id ||
+          (typeof user?.vendor === 'object' ? user.vendor.id : user?.vendor) ||
+          'default-vendor';
         return {
-          id: user?.vendor_id || user?.vendor || 'default-vendor'
+          id: vendorId
         };
       }
     },
@@ -97,22 +120,23 @@ export default function Staff() {
         // Update staff member (phone only for now, name/email/role disabled)
         await apiService.staffAPI.update(editingStaffId, {
           phone: formData.phone || null,
+          permissions: formData.permissions,
         });
         toast.success('Staff member updated successfully');
       } else {
-        // Create new staff member - need password
-        const password = Math.random().toString(36).slice(-8); // Generate temp password
+        // Create new staff member
         const staffData = {
           fullName: formData.full_name.trim(),
           email: formData.email.trim(),
           phone: formData.phone.trim() || null,
           role: formData.role,
           vendorId: vendorData.id,
-          password: password,
+          password: formData.password,
+          permissions: formData.permissions,
         };
 
         await apiService.staffAPI.create(staffData);
-        toast.success(`Staff member created successfully. Password: ${password}`);
+        toast.success(`Staff member created successfully`);
       }
 
       queryClient.invalidateQueries({ queryKey: ['vendor-staff'] });
@@ -122,7 +146,9 @@ export default function Staff() {
         full_name: '',
         email: '',
         phone: '',
+        password: '',
         role: 'vendor_staff',
+        permissions: [],
       });
     } catch (error: any) {
       console.error('Error:', error);
@@ -139,7 +165,11 @@ export default function Staff() {
         full_name: staff.full_name || '',
         email: staff.email || '',
         phone: staff.phone || '',
+        password: '',
         role: staff.role || 'vendor_staff',
+        permissions: typeof staff.permissions === 'string'
+          ? JSON.parse(staff.permissions)
+          : (Array.isArray(staff.permissions) ? staff.permissions : []),
       });
     } else {
       setEditingStaffId(null);
@@ -147,7 +177,9 @@ export default function Staff() {
         full_name: '',
         email: '',
         phone: '',
+        password: '',
         role: 'vendor_staff',
+        permissions: [],
       });
     }
     setOpen(true);
@@ -162,7 +194,7 @@ export default function Staff() {
     if (!window.confirm('Are you sure you want to delete this staff member?')) {
       return;
     }
-    
+
     try {
       await apiService.staffAPI.delete(staffId);
       toast.success('Staff member deleted successfully');
@@ -187,7 +219,7 @@ export default function Staff() {
           <h1 className="text-3xl font-bold text-foreground">Staff Management</h1>
           <p className="text-muted-foreground">Manage your staff members</p>
         </div>
-        <Dialog open={open} onOpenChange={handleCloseDialog}>
+        <Dialog open={open} onOpenChange={(val) => !val && handleCloseDialog()}>
           <DialogTrigger asChild>
             <Button onClick={() => handleOpenDialog()}>
               <Plus className="h-4 w-4 mr-2" />
@@ -224,6 +256,19 @@ export default function Staff() {
                 />
               </div>
 
+              {!editingStaffId && (
+                <div className="space-y-2">
+                  <Label>Password *</Label>
+                  <Input
+                    type="password"
+                    value={formData.password}
+                    onChange={(e) => setFormData({ ...formData, password: e.target.value })}
+                    placeholder="••••••••"
+                    required
+                  />
+                </div>
+              )}
+
               <div className="space-y-2">
                 <Label>Phone</Label>
                 <Input
@@ -234,25 +279,40 @@ export default function Staff() {
                 />
               </div>
 
-              <div className="space-y-2">
-                <Label>Role *</Label>
-                <Select
-                  value={formData.role}
-                  onValueChange={(value) => setFormData({ ...formData, role: value })}
-                  disabled={!!editingStaffId}
-                >
-                  <SelectTrigger>
-                    <SelectValue placeholder="Select role" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="vendor_staff">Vendor Staff</SelectItem>
-                    <SelectItem value="designer_staff">Designer Staff</SelectItem>
-                    <SelectItem value="data_operator">Data Operator</SelectItem>
-                    <SelectItem value="sales_person">Sales Person</SelectItem>
-                    <SelectItem value="accounts_manager">Accounts Manager</SelectItem>
-                    <SelectItem value="production_manager">Production Manager</SelectItem>
-                  </SelectContent>
-                </Select>
+              <div className="space-y-3 pb-4">
+                <div className="flex items-center gap-2">
+                  <Shield className="h-4 w-4 text-primary" />
+                  <Label className="text-base font-semibold">Section Permissions</Label>
+                </div>
+                <div className="grid grid-cols-2 gap-3 bg-muted/50 p-4 rounded-lg border">
+                  {AVAILABLE_PERMISSIONS.map((perm) => (
+                    <div key={perm.id} className="flex items-center space-x-2">
+                      <Checkbox
+                        id={`perm-${perm.id}`}
+                        checked={formData.permissions.includes(perm.id)}
+                        onCheckedChange={(checked) => {
+                          if (checked) {
+                            setFormData({
+                              ...formData,
+                              permissions: [...formData.permissions, perm.id]
+                            });
+                          } else {
+                            setFormData({
+                              ...formData,
+                              permissions: formData.permissions.filter(p => p !== perm.id)
+                            });
+                          }
+                        }}
+                      />
+                      <Label
+                        htmlFor={`perm-${perm.id}`}
+                        className="text-sm font-normal cursor-pointer"
+                      >
+                        {perm.label}
+                      </Label>
+                    </div>
+                  ))}
+                </div>
               </div>
 
               <Button type="submit" className="w-full" disabled={loading || !formData.full_name || !formData.email}>

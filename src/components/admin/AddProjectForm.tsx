@@ -42,32 +42,24 @@ export function AddProjectForm() {
   const { data: vendorData, isLoading: vendorLoading } = useQuery({
     queryKey: ['vendor-form', user?.id],
     queryFn: async () => {
-      if (!user?.id) {
-        console.log('❌ [AddProjectForm] No user ID available');
-        return null;
-      }
-      
+      if (!user?.id) return null;
       try {
-        console.log('🔍 [AddProjectForm] Starting vendor lookup for user:', user.id);
-        
-        // Get profile which contains vendor_id
-        const profileResponse = await apiService.profilesAPI.getById(user.id);
-        console.log('📦 [AddProjectForm] Profile response:', profileResponse);
-        
-        // Extract vendor_id from response
-        const profileData = profileResponse?.data || profileResponse;
-        const vendorId = profileData?.vendor_id;
-        
-        if (!vendorId) {
-          console.error('❌ [AddProjectForm] No vendor_id found in profile:', profileData);
-          throw new Error('No vendor_id found in profile');
-        }
-        
-        console.log('✅ [AddProjectForm] Got vendor_id:', vendorId);
-        return { id: vendorId };
+        const response = await apiService.profilesAPI.getById(user.id);
+        const profile = response.data || response;
+
+        const vendorId = profile?.vendor_id ||
+          (typeof user?.vendor === 'object' ? user.vendor.id : user?.vendor) ||
+          'default-vendor';
+
+        return {
+          ...profile,
+          id: vendorId
+        };
       } catch (error) {
-        console.error('❌ [AddProjectForm] Vendor lookup failed:', error.message);
-        return null;
+        console.error('Failed to fetch vendor:', error);
+        return {
+          id: (typeof user?.vendor === 'object' ? user.vendor.id : user?.vendor) || 'default-vendor'
+        };
       }
     },
     enabled: !!user?.id,
@@ -84,7 +76,7 @@ export function AddProjectForm() {
         console.log('🔍 [AddProjectForm] Fetching clients for vendor:', vendorData.id);
         const response = await apiService.clientsAPI.getByVendor(vendorData.id);
         console.log('📦 [AddProjectForm] Clients response:', response);
-        
+
         // Handle response structure { success, data: [...] }
         const clientsList = response?.data || (Array.isArray(response) ? response : []);
         console.log('✅ [AddProjectForm] Processed clients:', clientsList);
@@ -99,13 +91,13 @@ export function AddProjectForm() {
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    
+
     if (vendorLoading) {
       toast.error('Still loading vendor information, please wait...');
       console.warn('❌ [AddProjectForm] Form submitted while vendor is still loading');
       return;
     }
-    
+
     if (!vendorData?.id) {
       toast.error('Vendor not found. Please check console for details.');
       console.error('❌ [AddProjectForm] No vendorData.id on submit');
@@ -113,13 +105,13 @@ export function AddProjectForm() {
       console.error('  user:', user);
       return;
     }
-    
+
     if (!formData.project_name.trim()) {
       toast.error('Project name is required');
       console.warn('❌ [AddProjectForm] Project name is empty');
       return;
     }
-    
+
     setLoading(true);
 
     try {
@@ -134,7 +126,7 @@ export function AddProjectForm() {
         budget: formData.budget ? parseFloat(formData.budget) : null,
         notes: formData.notes.trim() || null,
       };
-      
+
       console.log('📤 [AddProjectForm] Sending project creation payload:', projectPayload);
       const response = await apiService.projectsAPI.create(projectPayload);
       console.log('✅ [AddProjectForm] Project created successfully:', response);

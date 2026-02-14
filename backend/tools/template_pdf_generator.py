@@ -68,13 +68,33 @@ class TemplatePDFGenerator:
         c.rect(photo_x, photo_y, photo_width, photo_height, fill=1, stroke=1)
         
         # Student photo
-        photo_url = record.get('photo_url') or record.get('school_id_url')
-        if photo_url and os.path.exists(photo_url):
+        # Check multiple possible keys for the photo
+        photo_keys = ['photo_url', 'school_id_url', 'photo', 'Photo', 'image', 'Image', 'Profile Picture']
+        photo_url = None
+        for key in photo_keys:
+            if record.get(key):
+                photo_url = record.get(key)
+                break
+        
+        if photo_url:
             try:
-                c.drawImage(photo_url, photo_x + 1, photo_y + 1, 
-                           photo_width - 2, photo_height - 2, 
-                           preserveAspectRatio=True)
-            except:
+                # Handle local files
+                if os.path.exists(photo_url):
+                     c.drawImage(photo_url, photo_x + 1, photo_y + 1, 
+                               photo_width - 2, photo_height - 2, 
+                               preserveAspectRatio=True)
+                # Handle URLs (simple check)
+                elif photo_url.lower().startswith(('http://', 'https://')):
+                     try:
+                        # ReportLab supports URLs, but sometimes needs help. 
+                        # We rely on reportlab's internal handling of URLs which usually works if valid
+                        c.drawImage(photo_url, photo_x + 1, photo_y + 1, 
+                                   photo_width - 2, photo_height - 2, 
+                                   preserveAspectRatio=True)
+                     except Exception as e:
+                        print(f"Failed to load remote image {photo_url}: {e}")
+            except Exception as e:
+                print(f"Failed to draw image {photo_url}: {e}")
                 pass
         
         # Student info

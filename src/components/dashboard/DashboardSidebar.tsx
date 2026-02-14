@@ -49,7 +49,12 @@ export function DashboardSidebar() {
     localStorage.setItem('sidebar-active-mode', activeMode);
   }, [activeMode]);
 
-  const isVendorStaff = hasRole('vendor_staff');
+  const isVendorStaff = hasRole('vendor_staff') ||
+    hasRole('designer_staff') ||
+    hasRole('data_operator') ||
+    hasRole('sales_person') ||
+    hasRole('accounts_manager') ||
+    hasRole('production_manager');
 
   // Fetch user profile
   const { data: profile } = useQuery({
@@ -145,6 +150,23 @@ export function DashboardSidebar() {
     { icon: AlertCircle, label: 'Complaints', path: '/dashboard/complaints' },
   ];
 
+  const permissionToMenu: Record<string, any> = {
+    'dashboard': { icon: Home, label: 'Home', path: '/dashboard' },
+    'items': { icon: Package, label: 'Items', path: '/items' },
+    'clients': { icon: Users, label: 'Clients', path: '/dashboard/clients' },
+    'projects': { icon: FolderKanban, label: 'Projects', path: '/dashboard/projects' },
+    'tasks': { icon: CheckSquare, label: 'Project Task', path: '/dashboard/tasks' },
+    'staff': { icon: UserCog, label: 'Staff', path: '/dashboard/staff' },
+    'transactions': { icon: ArrowLeftRight, label: 'Transactions', path: '/dashboard/transactions' },
+    'print_orders': { icon: Printer, label: 'Print Orders', path: '/dashboard/print-orders' },
+    'complaints': { icon: AlertCircle, label: 'Complaints', path: '/dashboard/complaints' },
+    'reports': [
+      { icon: BarChart3, label: 'Sales Report', path: '/dashboard/sales-report' },
+      { icon: TrendingUp, label: 'Profit Report', path: '/dashboard/profit-report' },
+      { icon: PieChart, label: 'Expected Sales Report', path: '/dashboard/expected-sales' },
+    ]
+  };
+
   // Super Admin Menu
   const superAdminMenu = [
     { icon: Home, label: 'Overview', path: '/dashboard' },
@@ -175,11 +197,31 @@ export function DashboardSidebar() {
   let menuItems = [];
   if (isSuperAdmin) {
     menuItems = superAdminMenu;
-  } else if (isVendor && !isVendorStaff) {
+  } else if (isVendor && !hasRole('vendor_staff') && !hasRole('designer_staff') && !hasRole('data_operator') && !hasRole('sales_person') && !hasRole('accounts_manager') && !hasRole('production_manager')) {
     // Master vendor - switch between vendor mode and self mode
     menuItems = activeMode === 'vendor' ? vendorModeMenu : selfModeMenu;
+  } else if (user?.permissions && Array.isArray(user.permissions)) {
+    // Staff members with custom permissions
+    const customMenu: any[] = [];
+
+    // Always add Home if not present but many staff need it
+    if (!user.permissions.includes('dashboard')) {
+      customMenu.push({ icon: Home, label: 'Home', path: '/dashboard' });
+    }
+
+    user.permissions.forEach(permId => {
+      const menu = permissionToMenu[permId];
+      if (menu) {
+        if (Array.isArray(menu)) {
+          customMenu.push(...menu);
+        } else {
+          customMenu.push(menu);
+        }
+      }
+    });
+    menuItems = customMenu;
   } else {
-    // Staff members get role-specific menus
+    // Staff members get role-specific menus as fallback
     menuItems = getStaffMenu();
   }
 

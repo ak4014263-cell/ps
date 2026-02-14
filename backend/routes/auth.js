@@ -37,7 +37,7 @@ router.post('/login', async (req, res) => {
     const emailLower = email.toLowerCase();
     console.log('📧 Looking up profile for:', emailLower);
     console.log('📧 Looking up with exact string:', JSON.stringify(emailLower));
-    
+
     const profile = await getOne(
       'SELECT id, full_name, email FROM profiles WHERE LOWER(email) = LOWER(?)',
       [emailLower]
@@ -110,6 +110,27 @@ router.post('/login', async (req, res) => {
       [profile.id, token, expiresAt, token, expiresAt]
     );
 
+    // Get permissions if vendor staff
+    let permissions = null;
+    if (role?.role === 'vendor_staff' ||
+      role?.role === 'designer_staff' ||
+      role?.role === 'data_operator' ||
+      role?.role === 'sales_person' ||
+      role?.role === 'accounts_manager' ||
+      role?.role === 'production_manager') {
+      const staffInfo = await getOne(
+        'SELECT permissions FROM vendor_staff WHERE user_id = ?',
+        [profile.id]
+      );
+      if (staffInfo?.permissions) {
+        try {
+          permissions = JSON.parse(staffInfo.permissions);
+        } catch (e) {
+          console.error('Failed to parse permissions:', e);
+        }
+      }
+    }
+
     res.json({
       success: true,
       data: {
@@ -118,7 +139,8 @@ router.post('/login', async (req, res) => {
           email: profile.email,
           fullName: profile.full_name,
           role: role?.role || 'client',
-          vendor: vendor
+          vendor: vendor,
+          permissions: permissions
         },
         token,
         expiresAt
@@ -275,6 +297,41 @@ router.post('/verify', async (req, res) => {
       [session.user_id]
     );
 
+    // Get vendor info if vendor or staff
+    let vendor = null;
+    if (role?.role === 'master_vendor' ||
+      role?.role === 'vendor_staff' ||
+      role?.role === 'designer_staff' ||
+      role?.role === 'data_operator' ||
+      role?.role === 'sales_person' ||
+      role?.role === 'accounts_manager' ||
+      role?.role === 'production_manager') {
+      // Find vendor assigned to this user (if master_vendor) or via vendor_staff (if staff)
+      vendor = await getOne(
+        `SELECT v.id, v.business_name 
+         FROM vendors v 
+         WHERE v.user_id = ? 
+         OR v.id = (SELECT vendor_id FROM vendor_staff WHERE user_id = ?)`,
+        [session.user_id, session.user_id]
+      );
+    }
+
+    // Get permissions if staff
+    let permissions = null;
+    if (role?.role && role.role !== 'client' && role.role !== 'super_admin') {
+      const staffInfo = await getOne(
+        'SELECT permissions FROM vendor_staff WHERE user_id = ?',
+        [session.user_id]
+      );
+      if (staffInfo?.permissions) {
+        try {
+          permissions = JSON.parse(staffInfo.permissions);
+        } catch (e) {
+          console.error('Failed to parse permissions:', e);
+        }
+      }
+    }
+
     res.json({
       success: true,
       data: {
@@ -282,7 +339,9 @@ router.post('/verify', async (req, res) => {
           id: profile.id,
           email: profile.email,
           fullName: profile.full_name,
-          role: role?.role || 'client'
+          role: role?.role || 'client',
+          vendor: vendor,
+          permissions: permissions
         }
       }
     });

@@ -49,45 +49,22 @@ export function AddClientForm() {
     queryFn: async () => {
       if (!user?.id) return null;
       try {
-        console.log('Starting vendor lookup...');
-        
-        // Try to get vendor from user object first (if user is a vendor)
-        if (user?.vendor?.id) {
-          console.log('✅ Got vendor from user object:', user.vendor.id);
-          return { id: user.vendor.id, ...user.vendor };
-        }
+        const response = await apiService.profilesAPI.getById(user.id);
+        const profile = response.data || response;
 
-        // Try to get from profile
-        console.log('Fetching profile for user:', user.id);
-        const profile = await apiService.profilesAPI.getById(user.id);
-        console.log('Profile fetched:', profile);
-        
-        if (profile?.vendor_id) {
-          console.log('✅ Got vendor from profile:', profile.vendor_id);
-          return { id: profile.vendor_id, ...profile };
-        }
+        const vendorId = profile?.vendor_id ||
+          (typeof user?.vendor === 'object' ? user.vendor.id : user?.vendor) ||
+          'default-vendor';
 
-        // Last resort: get all vendors and use the first one (for testing/development)
-        console.log('Fetching all vendors...');
-        const allVendors = await apiService.vendorsAPI.getAll();
-        console.log('All vendors response:', allVendors);
-        
-        if (allVendors && Array.isArray(allVendors) && allVendors.length > 0) {
-          console.log('✅ Using first available vendor:', allVendors[0].id);
-          return { id: allVendors[0].id, ...allVendors[0] };
-        }
-
-        if (allVendors?.data && Array.isArray(allVendors.data) && allVendors.data.length > 0) {
-          console.log('✅ Using first available vendor (from data):', allVendors.data[0].id);
-          return { id: allVendors.data[0].id, ...allVendors.data[0] };
-        }
-
-        console.error('❌ No vendors found in database');
-        console.error('Vendor response structure:', allVendors);
-        return null;
+        return {
+          ...profile,
+          id: vendorId
+        };
       } catch (error) {
-        console.error('❌ Failed to fetch vendor:', error);
-        return null;
+        console.error('Failed to fetch vendor:', error);
+        return {
+          id: (typeof user?.vendor === 'object' ? user.vendor.id : user?.vendor) || 'default-vendor'
+        };
       }
     },
     enabled: !!user?.id,
@@ -95,12 +72,12 @@ export function AddClientForm() {
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    
+
     if (vendorLoading) {
       toast.error('Still loading vendor information, please wait...');
       return;
     }
-    
+
     if (!vendorData?.id) {
       toast.error('Vendor not found. Please check console for details.');
       console.error('vendorData:', vendorData);
