@@ -11,7 +11,7 @@ echo "=========================================="
 echo ""
 
 # Configuration
-GITHUB_REPO="https://github.com/ak4014263-cell/cvd.git"
+GITHUB_REPO="https://github.com/ak4014263-cell/ps.git"
 APP_DIR="/var/www/crystal-admin"
 NODE_ENV="production"
 PORT=3001
