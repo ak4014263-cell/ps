@@ -249,6 +249,11 @@ app.use('/api/project-files', projectFilesRoutes);
 
 app.use('/api/batch', batchProcessingRoutes);
 
+// Handle any unmatched /api routes
+app.get('/api*', (req, res) => {
+  res.status(404).json({ error: 'API endpoint not found', path: req.path });
+});
+
 // ============================================================================
 // FRONTEND STATIC FILES (SPA)
 // ============================================================================
@@ -256,7 +261,7 @@ app.use('/api/batch', batchProcessingRoutes);
 const distPath = path.join(__dirname, '../dist');
 app.use(express.static(distPath));
 
-// SPA fallback - serve index.html for all non-API routes
+// SPA fallback - serve index.html for all non-API, non-static routes
 app.get('*', (req, res) => {
   const indexPath = path.join(distPath, 'index.html');
   res.sendFile(indexPath, (err) => {
