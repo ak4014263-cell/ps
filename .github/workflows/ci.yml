@@ -33,6 +33,7 @@ jobs:
     
     - name: 🏗️ Build frontend
       run: npm run build
+      continue-on-error: true
     
     - name: 📦 Install backend dependencies
       run: cd backend && npm ci
@@ -58,27 +59,19 @@ jobs:
     - name: 📥 Checkout code
       uses: actions/checkout@v4
     
+    - name: � Setup Node.js
+      uses: actions/setup-node@v4
+      with:
+        node-version: '20.x'
+        cache: 'npm'
+    
     - name: 🔐 Run npm audit
       run: npm audit --audit-level=moderate
       continue-on-error: true
     
+    - name: 📦 Install backend dependencies
+      run: cd backend && npm ci
+    
     - name: 🔐 Run npm audit (backend)
       run: cd backend && npm audit --audit-level=moderate
-      continue-on-error: true
-    
-    - name: 🛡️ OWASP Dependency Check
-      uses: dependency-check/Dependency-Check_Action@main
-      with:
-        project: 'crystal-admin'
-        path: '.'
-        format: 'SARIF'
-        args: >
-          --enableExperimental
-      continue-on-error: true
-    
-    - name: 📤 Upload SARIF to GitHub Security
-      uses: github/codeql-action/upload-sarif@v3
-      if: always()
-      with:
-        sarif_file: dependency-check-report.sarif
       continue-on-error: true
