@@ -12,29 +12,34 @@ Write-Host ""
 Write-Host "Repository: $Owner/$Repo" -ForegroundColor Yellow
 Write-Host ""
 
-# Check if gh CLI is installed
-if (-not (Get-Command gh -ErrorAction SilentlyContinue)) {
-    Write-Host "❌ GitHub CLI (gh) is not installed" -ForegroundColor Red
-    Write-Host "📥 Install from: https://cli.github.com/" -ForegroundColor Yellow
+# Check if gh CLI is installed or find it in common locations
+$ghPath = $null
+if (Get-Command gh -ErrorAction SilentlyContinue) {
+    $ghPath = "gh"
+} elseif (Test-Path "C:\Program Files\GitHub CLI\gh.exe") {
+    $ghPath = "C:\Program Files\GitHub CLI\gh.exe"
+} else {
+    Write-Host "[ERROR] GitHub CLI (gh) is not installed or not in PATH" -ForegroundColor Red
+    Write-Host "[INFO] Install from: https://cli.github.com/" -ForegroundColor Yellow
     exit 1
 }
 
-Write-Host "✅ GitHub CLI detected" -ForegroundColor Green
+Write-Host "[OK] GitHub CLI detected" -ForegroundColor Green
 Write-Host ""
 
 # Check authentication
-Write-Host "🔐 Checking GitHub authentication..."
-$status = gh auth status 2>&1
+Write-Host "[INFO] Checking GitHub authentication..."
+$status = & $ghPath auth status 2>&1
 if ($LASTEXITCODE -ne 0) {
-    Write-Host "❌ Not authenticated with GitHub" -ForegroundColor Red
-    Write-Host "🔑 Run: gh auth login" -ForegroundColor Yellow
+    Write-Host "[ERROR] Not authenticated with GitHub" -ForegroundColor Red
+    Write-Host "[ACTION] Run: gh auth login" -ForegroundColor Yellow
     exit 1
 }
-Write-Host "✅ Authenticated with GitHub" -ForegroundColor Green
+Write-Host "[OK] Authenticated with GitHub" -ForegroundColor Green
 Write-Host ""
 
 # Collect required secrets
-Write-Host "📝 Collecting deployment configuration..." -ForegroundColor Cyan
+Write-Host "[INFO] Collecting deployment configuration..." -ForegroundColor Cyan
 Write-Host ""
 
 $secrets = @{
@@ -53,24 +58,24 @@ $secrets = @{
 }
 
 Write-Host ""
-Write-Host "🔐 SSH Key Setup" -ForegroundColor Cyan
+Write-Host "[INFO] SSH Key Setup" -ForegroundColor Cyan
 Write-Host ""
 
 $sshKeyPath = Read-Host "Path to SSH private key (e.g., C:\Users\YourUser\.ssh\id_rsa)"
 
 if (Test-Path $sshKeyPath) {
-    Write-Host "📖 Reading SSH key..." -ForegroundColor Yellow
+    Write-Host "[INFO] Reading SSH key..." -ForegroundColor Yellow
     $sshKeyContent = Get-Content $sshKeyPath -Raw
     $secrets["PROD_DEPLOY_SSH_KEY"] = $sshKeyContent
     $secrets["DEV_DEPLOY_SSH_KEY"] = $sshKeyContent
-    Write-Host "✅ SSH key loaded" -ForegroundColor Green
+    Write-Host "[OK] SSH key loaded" -ForegroundColor Green
 } else {
-    Write-Host "❌ SSH key not found at: $sshKeyPath" -ForegroundColor Red
-    Write-Host "📋 Skipping SSH key configuration" -ForegroundColor Yellow
+    Write-Host "[ERROR] SSH key not found at: $sshKeyPath" -ForegroundColor Red
+    Write-Host "[INFO] Skipping SSH key configuration" -ForegroundColor Yellow
 }
 
 Write-Host ""
-Write-Host "📤 Setting GitHub Secrets..." -ForegroundColor Cyan
+Write-Host "[INFO] Setting GitHub Secrets..." -ForegroundColor Cyan
 Write-Host ""
 
 $successCount = 0
@@ -81,22 +86,22 @@ foreach ($key in $secrets.Keys) {
     
     # Skip empty values
     if ([string]::IsNullOrWhiteSpace($value)) {
-        Write-Host "⏭️  Skipping $key (empty)" -ForegroundColor Gray
+        Write-Host "[SKIP] Skipping $key (empty)" -ForegroundColor Gray
         $skipCount++
         continue
     }
     
     # Create secret
-    Write-Host "📝 Setting $key..." -ForegroundColor Yellow
+    Write-Host "[ACTION] Setting $key..." -ForegroundColor Yellow
     
     # Use echo to pipe value to gh secret set
-    $value | gh secret set $key --repo $Owner/$Repo 2>&1
+    $value | & $ghPath secret set $key --repo $Owner/$Repo 2>&1
     
     if ($LASTEXITCODE -eq 0) {
-        Write-Host "✅ $key set successfully" -ForegroundColor Green
+        Write-Host "[OK] $key set successfully" -ForegroundColor Green
         $successCount++
     } else {
-        Write-Host "⚠️  Failed to set $key" -ForegroundColor Red
+        Write-Host "[WARN] Failed to set $key" -ForegroundColor Red
     }
 }
 
@@ -104,10 +109,10 @@ Write-Host ""
 Write-Host "========================================" -ForegroundColor Cyan
 Write-Host "Setup Summary" -ForegroundColor Green
 Write-Host "========================================" -ForegroundColor Cyan
-Write-Host "✅ Secrets set: $successCount" -ForegroundColor Green
-Write-Host "⏭️  Secrets skipped: $skipCount" -ForegroundColor Yellow
+Write-Host "[OK] Secrets set: $successCount" -ForegroundColor Green
+Write-Host "[SKIP] Secrets skipped: $skipCount" -ForegroundColor Yellow
 Write-Host ""
-Write-Host "📋 Next Steps:" -ForegroundColor Cyan
+Write-Host "[INFO] Next Steps:" -ForegroundColor Cyan
 Write-Host ""
 Write-Host "1. Run the server setup script on your deployment server:"
 Write-Host "   Linux/Mac:  bash setup-ci-cd-server.sh"
@@ -119,5 +124,5 @@ Write-Host ""
 Write-Host "3. Monitor deployment:"
 Write-Host "   https://github.com/$Owner/$Repo/actions"
 Write-Host ""
-Write-Host "📖 Full documentation: CI_CD_SETUP.md" -ForegroundColor Cyan
+Write-Host "[INFO] Full documentation: CI_CD_SETUP.md" -ForegroundColor Cyan
 Write-Host ""
