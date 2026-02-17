@@ -1,0 +1,192 @@
+name: Deploy - Automatic Deployment
+
+on:
+  push:
+    branches:
+      - main        # Production deployment
+      - develop     # Development deployment
+  workflow_dispatch:  # Manual trigger
+    inputs:
+      environment:
+        description: 'Deployment environment'
+        required: true
+        default: 'development'
+        type: choice
+        options:
+          - development
+          - staging
+          - production
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    
+    environment:
+      name: ${{ github.ref == 'refs/heads/main' && 'production' || 'development' }}
+    
+    steps:
+    - name: 📥 Checkout code
+      uses: actions/checkout@v4
+      with:
+        fetch-depth: 0
+    
+    - name: 📦 Setup Node.js
+      uses: actions/setup-node@v4
+      with:
+        node-version: '20.x'
+        cache: 'npm'
+    
+    - name: 📝 Set deployment environment
+      run: |
+        if [[ "${{ github.ref }}" == "refs/heads/main" ]]; then
+          echo "DEPLOY_ENV=production" >> $GITHUB_ENV
+          echo "API_URL=${{ secrets.PROD_API_URL }}" >> $GITHUB_ENV
+          echo "DEPLOY_HOST=${{ secrets.PROD_DEPLOY_HOST }}" >> $GITHUB_ENV
+          echo "DEPLOY_USER=${{ secrets.PROD_DEPLOY_USER }}" >> $GITHUB_ENV
+        else
+          echo "DEPLOY_ENV=development" >> $GITHUB_ENV
+          echo "API_URL=${{ secrets.DEV_API_URL }}" >> $GITHUB_ENV
+          echo "DEPLOY_HOST=${{ secrets.DEV_DEPLOY_HOST }}" >> $GITHUB_ENV
+          echo "DEPLOY_USER=${{ secrets.DEV_DEPLOY_USER }}" >> $GITHUB_ENV
+        fi
+    
+    - name: 📦 Install frontend dependencies
+      run: npm ci
+    
+    - name: 🏗️ Build frontend for ${{ env.DEPLOY_ENV }}
+      run: npm run build
+      env:
+        VITE_API_URL: ${{ env.API_URL }}
+    
+    - name: 📦 Install backend dependencies
+      run: cd backend && npm ci --omit=dev
+    
+    - name: 📝 Create .env file for backend
+      run: |
+        cat > backend/.env << EOF
+        NODE_ENV=${{ env.DEPLOY_ENV }}
+        PORT=${{ secrets.BACKEND_PORT || '3001' }}
+        DATABASE_URL=${{ secrets.DATABASE_URL }}
+        REDIS_URL=${{ secrets.REDIS_URL || 'redis://localhost:6379' }}
+        SUPABASE_URL=${{ secrets.SUPABASE_URL }}
+        SUPABASE_KEY=${{ secrets.SUPABASE_KEY }}
+        JWT_SECRET=${{ secrets.JWT_SECRET }}
+        EOF
+    
+    - name: 🏗️ Build Docker image
+      run: |
+        docker build -t crystal-admin:${{ github.sha }} .
+        docker build -t crystal-admin:latest .
+        docker tag crystal-admin:latest ghcr.io/${{ github.repository }}:latest
+        docker tag crystal-admin:${{ github.sha }} ghcr.io/${{ github.repository }}:${{ github.sha }}
+    
+    - name: 🔐 Login to GitHub Container Registry
+      uses: docker/login-action@v3
+      with:
+        registry: ghcr.io
+        username: ${{ github.actor }}
+        password: ${{ secrets.GITHUB_TOKEN }}
+    
+    - name: 📤 Push Docker image to registry
+      run: |
+        docker push ghcr.io/${{ github.repository }}:${{ github.sha }}
+        docker push ghcr.io/${{ github.repository }}:latest
+    
+    - name: 🔑 Setup SSH key
+      run: |
+        mkdir -p ~/.ssh
+        echo "${{ secrets.DEPLOY_SSH_KEY }}" > ~/.ssh/id_rsa
+        chmod 600 ~/.ssh/id_rsa
+        ssh-keyscan -H ${{ env.DEPLOY_HOST }} >> ~/.ssh/known_hosts
+    
+    - name: 📤 Deploy to server
+      run: |
+        ssh ${{ env.DEPLOY_USER }}@${{ env.DEPLOY_HOST }} << 'DEPLOY_SCRIPT'
+        set -e
+        cd /app/crystal-admin
+        
+        # Pull latest code
+        git fetch origin
+        git reset --hard origin/${{ github.ref_name }}
+        
+        # Pull latest Docker images
+        docker pull ghcr.io/${{ github.repository }}:${{ github.sha }}
+        
+        # Update docker-compose with new image tag
+        sed -i 's|image: ghcr.io/${{ github.repository }}:.*|image: ghcr.io/${{ github.repository }}:${{ github.sha }}|g' docker-compose.yml
+        
+        # Stop and remove old containers
+        docker-compose down
+        
+        # Start new containers
+        docker-compose up -d
+        
+        # Run database migrations if any
+        docker-compose exec -T backend npm run migrate
+        
+        # Wait for health checks
+        sleep 10
+        
+        # Verify deployment
+        curl -f http://localhost:3000/health || exit 1
+        curl -f http://localhost:3001/api/health || exit 1
+        
+        echo "✅ Deployment successful!"
+        DEPLOY_SCRIPT
+    
+    - name: 🔔 Notify on success
+      if: success()
+      uses: actions/github-script@v7
+      with:
+        script: |
+          github.rest.issues.createComment({
+            issue_number: context.issue.number,
+            owner: context.repo.owner,
+            repo: context.repo.repo,
+            body: `✅ **Deployment Successful!**\n\n**Environment:** ${{ env.DEPLOY_ENV }}\n**Commit:** ${{ github.sha }}\n**Time:** $(date -u +'%Y-%m-%d %H:%M:%S UTC')`
+          })
+    
+    - name: ❌ Notify on failure
+      if: failure()
+      uses: actions/github-script@v7
+      with:
+        script: |
+          github.rest.issues.createComment({
+            issue_number: context.issue.number,
+            owner: context.repo.owner,
+            repo: context.repo.repo,
+            body: `❌ **Deployment Failed!**\n\n**Environment:** ${{ env.DEPLOY_ENV }}\n**Commit:** ${{ github.sha }}\n**Logs:** Check the Actions tab for details.`
+          })
+
+  rollback:
+    needs: deploy
+    runs-on: ubuntu-latest
+    if: failure()
+    
+    steps:
+    - name: 🔑 Setup SSH key
+      run: |
+        mkdir -p ~/.ssh
+        echo "${{ secrets.DEPLOY_SSH_KEY }}" > ~/.ssh/id_rsa
+        chmod 600 ~/.ssh/id_rsa
+        ssh-keyscan -H ${{ secrets.PROD_DEPLOY_HOST }} >> ~/.ssh/known_hosts
+    
+    - name: ⏮️ Rollback deployment
+      run: |
+        ssh ${{ secrets.PROD_DEPLOY_USER }}@${{ secrets.PROD_DEPLOY_HOST }} << 'ROLLBACK_SCRIPT'
+        set -e
+        cd /app/crystal-admin
+        
+        # Get previous commit
+        PREVIOUS_SHA=$(git rev-parse HEAD~1)
+        
+        # Rollback to previous version
+        git reset --hard $PREVIOUS_SHA
+        
+        # Update docker-compose
+        docker-compose down
+        docker-compose pull
+        docker-compose up -d
+        
+        echo "⏮️ Rollback to $PREVIOUS_SHA completed"
+        ROLLBACK_SCRIPT

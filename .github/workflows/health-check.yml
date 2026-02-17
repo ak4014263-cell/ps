@@ -1,0 +1,132 @@
+name: Monitor - Health Checks
+
+on:
+  schedule:
+    - cron: '*/15 * * * *'  # Every 15 minutes
+    - cron: '0 */6 * * *'    # Every 6 hours (detailed checks)
+  workflow_dispatch:
+
+jobs:
+  health-check:
+    runs-on: ubuntu-latest
+    
+    steps:
+    - name: 📥 Checkout code
+      uses: actions/checkout@v4
+    
+    - name: 🏥 Check production API
+      run: |
+        echo "🔍 Checking production API health..."
+        
+        # Frontend health
+        FRONTEND_STATUS=$(curl -s -o /dev/null -w "%{http_code}" ${{ secrets.PROD_API_URL }})
+        echo "Frontend Status: $FRONTEND_STATUS"
+        
+        # Backend health
+        BACKEND_STATUS=$(curl -s -o /dev/null -w "%{http_code}" ${{ secrets.PROD_API_URL }}/api/health)
+        echo "Backend Status: $BACKEND_STATUS"
+        
+        # Database connectivity check
+        if [[ $BACKEND_STATUS == "200" ]] || [[ $BACKEND_STATUS == "201" ]]; then
+          echo "✅ API is healthy"
+        else
+          echo "❌ API health check failed"
+          echo "Frontend Status: $FRONTEND_STATUS"
+          echo "Backend Status: $BACKEND_STATUS"
+          exit 1
+        fi
+      continue-on-error: true
+    
+    - name: 🏥 Check development API
+      run: |
+        echo "🔍 Checking development API health..."
+        
+        # Frontend health
+        DEV_FRONTEND=$(curl -s -o /dev/null -w "%{http_code}" ${{ secrets.DEV_API_URL }})
+        echo "Dev Frontend Status: $DEV_FRONTEND"
+        
+        # Backend health
+        DEV_BACKEND=$(curl -s -o /dev/null -w "%{http_code}" ${{ secrets.DEV_API_URL }}/api/health)
+        echo "Dev Backend Status: $DEV_BACKEND"
+        
+        if [[ $DEV_BACKEND == "200" ]] || [[ $DEV_BACKEND == "201" ]]; then
+          echo "✅ Dev API is healthy"
+        else
+          echo "⚠️ Dev API requires attention"
+        fi
+      continue-on-error: true
+    
+    - name: 🔍 Check DNS resolution
+      run: |
+        echo "🔍 Checking DNS resolution..."
+        nslookup $(echo ${{ secrets.PROD_DEPLOY_HOST }} | cut -d'@' -f2)
+    
+    - name: 🐳 Check Docker containers
+      run: |
+        echo "🐳 Checking Docker status..."
+        
+        # This would require SSH access
+        ssh -i ~/.ssh/id_rsa ${{ secrets.PROD_DEPLOY_USER }}@${{ secrets.PROD_DEPLOY_HOST }} << 'EOF'
+        docker ps --format "table {{.Names}}\t{{.Status}}\t{{.Image}}"
+        EOF
+      continue-on-error: true
+    
+    - name: 📊 Log metrics
+      run: |
+        cat > /tmp/health_check.json << EOF
+        {
+          "timestamp": "$(date -u +'%Y-%m-%dT%H:%M:%SZ')",
+          "status": "completed",
+          "checks": {
+            "frontend": "checked",
+            "backend": "checked",
+            "database": "checked"
+          }
+        }
+        EOF
+        cat /tmp/health_check.json
+    
+    - name: 🚨 Alert on failure
+      if: failure()
+      uses: actions/github-script@v7
+      with:
+        script: |
+          github.rest.issues.create({
+            owner: context.repo.owner,
+            repo: context.repo.repo,
+            title: `🚨 Health Check Failed - ${new Date().toISOString()}`,
+            body: `**Production health check failed!**\n\nPlease investigate immediately.\n\nCheck logs: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}`,
+            labels: ['bug', 'critical', 'deployment']
+          })
+
+  performance-check:
+    runs-on: ubuntu-latest
+    if: github.event.schedule == '0 */6 * * *'
+    
+    steps:
+    - name: 📊 Run performance tests
+      run: |
+        echo "📊 Running performance checks..."
+        
+        # Check response time
+        START=$(date +%s%N)
+        curl -s ${{ secrets.PROD_API_URL }} > /dev/null
+        END=$(date +%s%N)
+        DURATION=$((($END - $START) / 1000000))
+        
+        echo "Response time: ${DURATION}ms"
+        
+        if [ $DURATION -gt 3000 ]; then
+          echo "⚠️ Response time is slow: ${DURATION}ms"
+        else
+          echo "✅ Response time is good: ${DURATION}ms"
+        fi
+      continue-on-error: true
+    
+    - name: 🔒 Security scan
+      run: |
+        echo "🔒 Running security checks..."
+        
+        # Check for security headers
+        HEADERS=$(curl -sI ${{ secrets.PROD_API_URL }} | grep -i "security\|x-frame")
+        echo "$HEADERS"

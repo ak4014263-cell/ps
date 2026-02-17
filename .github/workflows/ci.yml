@@ -1,0 +1,84 @@
+name: CI - Test & Build
+
+on:
+  push:
+    branches: [ main, develop ]
+  pull_request:
+    branches: [ main, develop ]
+
+jobs:
+  lint-and-test:
+    runs-on: ubuntu-latest
+    
+    strategy:
+      matrix:
+        node-version: [18.x, 20.x]
+    
+    steps:
+    - name: 📥 Checkout code
+      uses: actions/checkout@v4
+    
+    - name: 📦 Setup Node.js ${{ matrix.node-version }}
+      uses: actions/setup-node@v4
+      with:
+        node-version: ${{ matrix.node-version }}
+        cache: 'npm'
+    
+    - name: 📦 Install frontend dependencies
+      run: npm ci
+    
+    - name: 🔍 Lint frontend code
+      run: npm run lint
+      continue-on-error: true
+    
+    - name: 🏗️ Build frontend
+      run: npm run build
+    
+    - name: 📦 Install backend dependencies
+      run: cd backend && npm ci
+    
+    - name: 🔍 Lint backend code
+      run: cd backend && npm run lint
+      continue-on-error: true
+    
+    - name: 📊 Upload build artifacts
+      if: always()
+      uses: actions/upload-artifact@v3
+      with:
+        name: build-artifacts-node-${{ matrix.node-version }}
+        path: |
+          dist/
+          backend/node_modules/
+        retention-days: 5
+
+  security-scan:
+    runs-on: ubuntu-latest
+    
+    steps:
+    - name: 📥 Checkout code
+      uses: actions/checkout@v4
+    
+    - name: 🔐 Run npm audit
+      run: npm audit --audit-level=moderate
+      continue-on-error: true
+    
+    - name: 🔐 Run npm audit (backend)
+      run: cd backend && npm audit --audit-level=moderate
+      continue-on-error: true
+    
+    - name: 🛡️ OWASP Dependency Check
+      uses: dependency-check/Dependency-Check_Action@main
+      with:
+        project: 'crystal-admin'
+        path: '.'
+        format: 'SARIF'
+        args: >
+          --enableExperimental
+      continue-on-error: true
+    
+    - name: 📤 Upload SARIF to GitHub Security
+      uses: github/codeql-action/upload-sarif@v2
+      if: always()
+      with:
+        sarif_file: dependency-check-report.sarif
+      continue-on-error: true

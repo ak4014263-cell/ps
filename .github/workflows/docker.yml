@@ -1,0 +1,129 @@
+name: Docker - Build & Push
+
+on:
+  push:
+    branches: [ main, develop ]
+    paths:
+      - 'Dockerfile'
+      - 'docker-compose.yml'
+      - 'backend/**'
+      - 'src/**'
+      - '.github/workflows/docker.yml'
+  workflow_dispatch:
+
+jobs:
+  build-and-push:
+    runs-on: ubuntu-latest
+    
+    permissions:
+      contents: read
+      packages: write
+    
+    strategy:
+      matrix:
+        include:
+          - context: .
+            dockerfile: Dockerfile
+            image: crystal-admin
+            platforms: linux/amd64,linux/arm64
+    
+    steps:
+    - name: 📥 Checkout code
+      uses: actions/checkout@v4
+    
+    - name: 🏗️ Set up Docker Buildx
+      uses: docker/setup-buildx-action@v3
+    
+    - name: 🔐 Login to GitHub Container Registry
+      uses: docker/login-action@v3
+      with:
+        registry: ghcr.io
+        username: ${{ github.actor }}
+        password: ${{ secrets.GITHUB_TOKEN }}
+    
+    - name: 🔐 Login to Docker Hub
+      uses: docker/login-action@v3
+      with:
+        username: ${{ secrets.DOCKER_USERNAME }}
+        password: ${{ secrets.DOCKER_PASSWORD }}
+      if: secrets.DOCKER_USERNAME != ''
+    
+    - name: 📝 Extract metadata
+      id: meta
+      uses: docker/metadata-action@v5
+      with:
+        images: |
+          ghcr.io/${{ github.repository }}
+          docker.io/${{ secrets.DOCKER_USERNAME }}/crystal-admin
+        tags: |
+          type=ref,event=branch
+          type=sha,prefix={{branch}}-
+          type=semver,pattern={{version}}
+          type=raw,value=latest,enable={{is_default_branch}}
+    
+    - name: 🐳 Build and push Docker image
+      uses: docker/build-push-action@v5
+      with:
+        context: ${{ matrix.context }}
+        file: ${{ matrix.dockerfile }}
+        push: ${{ github.event_name != 'pull_request' }}
+        tags: ${{ steps.meta.outputs.tags }}
+        labels: ${{ steps.meta.outputs.labels }}
+        platforms: ${{ matrix.platforms }}
+        cache-from: type=registry,ref=ghcr.io/${{ github.repository }}:buildcache
+        cache-to: type=registry,ref=ghcr.io/${{ github.repository }}:buildcache,mode=max
+    
+    - name: 📝 Create build summary
+      run: |
+        cat > $GITHUB_STEP_SUMMARY << EOF
+        ## 🐳 Docker Build Complete
+        
+        **Image:** ${{ steps.meta.outputs.tags }}
+        **Platforms:** ${{ matrix.platforms }}
+        **Commit:** ${{ github.sha }}
+        **Branch:** ${{ github.ref_name }}
+        EOF
+
+  push-backend:
+    runs-on: ubuntu-latest
+    
+    permissions:
+      contents: read
+      packages: write
+    
+    steps:
+    - name: 📥 Checkout code
+      uses: actions/checkout@v4
+    
+    - name: 🏗️ Set up Docker Buildx
+      uses: docker/setup-buildx-action@v3
+    
+    - name: 🔐 Login to GitHub Container Registry
+      uses: docker/login-action@v3
+      with:
+        registry: ghcr.io
+        username: ${{ github.actor }}
+        password: ${{ secrets.GITHUB_TOKEN }}
+    
+    - name: 📝 Extract metadata
+      id: meta
+      uses: docker/metadata-action@v5
+      with:
+        images: |
+          ghcr.io/${{ github.repository }}-backend
+        tags: |
+          type=ref,event=branch
+          type=sha,prefix={{branch}}-
+          type=raw,value=latest,enable={{is_default_branch}}
+    
+    - name: 🐳 Build and push backend Docker image
+      uses: docker/build-push-action@v5
+      with:
+        context: ./backend
+        file: ./backend/Dockerfile.worker
+        push: ${{ github.event_name != 'pull_request' }}
+        tags: ${{ steps.meta.outputs.tags }}
+        labels: ${{ steps.meta.outputs.labels }}
+        platforms: linux/amd64,linux/arm64
+        cache-from: type=registry,ref=ghcr.io/${{ github.repository }}-backend:buildcache
+        cache-to: type=registry,ref=ghcr.io/${{ github.repository }}-backend:buildcache,mode=max
