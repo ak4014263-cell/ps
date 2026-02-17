@@ -182,8 +182,8 @@ export function DesignerDataPreviewPanel({
         // Parse JSON fields if needed
         return records.map((record: any) => ({
           ...record,
-          data_json: typeof record.data_json === 'string' 
-            ? JSON.parse(record.data_json) 
+          data_json: typeof record.data_json === 'string'
+            ? JSON.parse(record.data_json)
             : record.data_json,
         })).slice(0, 100);
       } catch (error) {
@@ -250,14 +250,14 @@ export function DesignerDataPreviewPanel({
 
   // Update sample data fields based on detected variables
   // Include `photo` as an editable variable so users can map/display it.
-  const relevantFields = detectedVariables.filter(v => 
+  const relevantFields = detectedVariables.filter(v =>
     !['barcode', 'qr_code'].includes(v)
   );
 
   const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
-    
+
     Papa.parse(file, {
       header: true,
       complete: (results) => {
@@ -294,7 +294,7 @@ export function DesignerDataPreviewPanel({
       const record = dataRecords[dbRecordIndex];
       const recordData = {
         ...(typeof record.data_json === 'object' ? record.data_json as Record<string, string> : {}),
-        photo: record.photo_url || record.cropped_photo_url || '',
+        photo: record.cropped_photo_url || record.photo_url || '',
         photo_url: record.photo_url || '',
         cropped_photo_url: record.cropped_photo_url || '',
       };
@@ -345,7 +345,7 @@ export function DesignerDataPreviewPanel({
       const record = dataRecords[index];
       const recordData = {
         ...(typeof record.data_json === 'object' ? record.data_json as Record<string, string> : {}),
-        photo: record.photo_url || record.cropped_photo_url || '',
+        photo: record.cropped_photo_url || record.photo_url || '',
         photo_url: record.photo_url || '',
         cropped_photo_url: record.cropped_photo_url || '',
       };
@@ -449,9 +449,9 @@ export function DesignerDataPreviewPanel({
                       />
                     </div>
                   ))}
-                  
+
                   <Separator />
-                  
+
                   {/* Face Crop Headroom Control */}
                   <div className="space-y-2 pt-2">
                     <Label className="text-xs font-medium">Face Crop Headroom: {photoHeadroom}%</Label>
@@ -505,7 +505,7 @@ export function DesignerDataPreviewPanel({
                   {(() => {
                     const client = clients.find(c => c.id === selectedClientId);
                     if (!client) return null;
-                    
+
                     return (
                       <>
                         {/* Logo and Signature preview */}
@@ -517,8 +517,8 @@ export function DesignerDataPreviewPanel({
                                 Logo
                               </Label>
                               <div className="w-12 h-12 rounded border overflow-hidden bg-muted">
-                                <img 
-                                  src={client.logo_url} 
+                                <img
+                                  src={client.logo_url}
                                   alt="Company logo"
                                   className="w-full h-full object-contain"
                                 />
@@ -532,8 +532,8 @@ export function DesignerDataPreviewPanel({
                                 Signature
                               </Label>
                               <div className="w-16 h-12 rounded border overflow-hidden bg-muted">
-                                <img 
-                                  src={client.signature_url} 
+                                <img
+                                  src={client.signature_url}
                                   alt="Signature"
                                   className="w-full h-full object-contain"
                                 />
@@ -578,9 +578,9 @@ export function DesignerDataPreviewPanel({
                           )}
                         </div>
 
-                        <Button 
-                          variant="outline" 
-                          size="sm" 
+                        <Button
+                          variant="outline"
+                          size="sm"
                           className="w-full text-xs"
                           onClick={() => {
                             const clientData = mapClientToPreviewData(client);
@@ -633,18 +633,18 @@ export function DesignerDataPreviewPanel({
                       <div className="flex items-center justify-between text-xs">
                         <span>Record {dbRecordIndex + 1} of {dataRecords.length}</span>
                         <div className="flex gap-1">
-                          <Button 
-                            variant="outline" 
-                            size="sm" 
+                          <Button
+                            variant="outline"
+                            size="sm"
                             className="h-6 px-2 text-xs"
                             disabled={dbRecordIndex === 0}
                             onClick={() => handleLoadDbRecord(dbRecordIndex - 1)}
                           >
                             Prev
                           </Button>
-                          <Button 
-                            variant="outline" 
-                            size="sm" 
+                          <Button
+                            variant="outline"
+                            size="sm"
                             className="h-6 px-2 text-xs"
                             disabled={dbRecordIndex >= dataRecords.length - 1}
                             onClick={() => handleLoadDbRecord(dbRecordIndex + 1)}
@@ -653,7 +653,7 @@ export function DesignerDataPreviewPanel({
                           </Button>
                         </div>
                       </div>
-                      
+
                       {/* Show photo preview if available */}
                       {(dataRecords[dbRecordIndex]?.photo_url || dataRecords[dbRecordIndex]?.cropped_photo_url) && (
                         <div className="space-y-1">
@@ -662,15 +662,15 @@ export function DesignerDataPreviewPanel({
                             Photo Preview
                           </Label>
                           <div className="w-16 h-20 rounded border overflow-hidden bg-muted">
-                            <img 
-                              src={dataRecords[dbRecordIndex].cropped_photo_url || dataRecords[dbRecordIndex].photo_url || ''} 
+                            <img
+                              src={dataRecords[dbRecordIndex].cropped_photo_url || dataRecords[dbRecordIndex].photo_url || ''}
                               alt="Record photo"
                               className="w-full h-full object-cover"
                             />
                           </div>
                         </div>
                       )}
-                      
+
                       {/* Show record data preview */}
                       <div className="text-xs bg-muted rounded p-2 max-h-32 overflow-auto">
                         <pre className="whitespace-pre-wrap">
@@ -695,23 +695,23 @@ export function DesignerDataPreviewPanel({
                 accept=".csv,.xlsx,.xls"
                 className="hidden"
               />
-              <Button 
-                variant="outline" 
-                className="w-full" 
+              <Button
+                variant="outline"
+                className="w-full"
                 onClick={() => fileInputRef.current?.click()}
               >
                 <Upload className="h-4 w-4 mr-2" />
                 Import CSV/Excel
               </Button>
-              
+
               {importedRecords.length > 0 && (
                 <div className="space-y-3">
                   <div className="flex items-center justify-between text-xs">
                     <span>Record {currentRecordIndex + 1} of {importedRecords.length}</span>
                     <div className="flex gap-1">
-                      <Button 
-                        variant="outline" 
-                        size="sm" 
+                      <Button
+                        variant="outline"
+                        size="sm"
                         className="h-6 px-2"
                         disabled={currentRecordIndex === 0}
                         onClick={() => {
@@ -723,9 +723,9 @@ export function DesignerDataPreviewPanel({
                       >
                         Prev
                       </Button>
-                      <Button 
-                        variant="outline" 
-                        size="sm" 
+                      <Button
+                        variant="outline"
+                        size="sm"
                         className="h-6 px-2"
                         disabled={currentRecordIndex >= importedRecords.length - 1}
                         onClick={() => {
@@ -762,8 +762,8 @@ export function DesignerDataPreviewPanel({
       </ScrollArea>
 
       <div className="p-4 border-t space-y-2 flex-shrink-0">
-        <Button 
-          className="w-full" 
+        <Button
+          className="w-full"
           onClick={handleApplyPreview}
           disabled={!isPreviewMode}
         >

@@ -670,20 +670,25 @@ router.post('/:id/upload-photo', async (req, res) => {
     await photoFile.mv(filepath);
     console.log(`[Upload] Saved photo to disk: ${filepath}`);
 
-    console.log(`[Upload] Updating database with filename: ${filename}`);
+    // Generate full URL
+    const baseUrl = req.protocol + '://' + req.get('host');
+    const fullPhotoUrl = `${baseUrl}/uploads/project-photos/${projectId || 'general'}/${filename}`;
 
-    // Update record with file path (store only the filename)
+    console.log(`[Upload] Updating database with full URL: ${fullPhotoUrl}`);
+
+    // Update record with full URL
     const result = await execute(
       `UPDATE data_records SET photo_url = ?, processing_status = ? WHERE id = ?`,
-      [filename, processing_status || 'processed', id]
+      [fullPhotoUrl, processing_status || 'processed', id]
     );
 
-    console.log(`[Upload] Database update result for ${id}: photo_url=${filename}, status=${processing_status}`);
+    console.log(`[Upload] Database update result for ${id}: photo_url=${fullPhotoUrl}, status=${processing_status}`);
 
     res.json({
       success: true,
       message: 'Photo uploaded successfully',
       recordId: id,
+      photoUrl: fullPhotoUrl,
       photoPath: relativePath,
       filename: filename
     });

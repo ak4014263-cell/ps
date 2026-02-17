@@ -170,7 +170,6 @@ Write-Host ""
 Write-Host "📊 View logs:" -ForegroundColor Cyan
 Write-Host "   pm2 logs crystal-admin-backend" -ForegroundColor Gray
 Write-Host ""
-Write-Host "🔄 Pull latest updates:" -ForegroundColor Cyan
-Write-Host "   ssh $VpsUser@$VpsIP" -ForegroundColor Gray
-Write-Host "   cd $ProjectPath; git pull origin main" -ForegroundColor Gray
+Write-Host "For future updates, run:" -ForegroundColor Cyan
+Write-Host "   git pull origin main" -ForegroundColor Gray
 Write-Host ""

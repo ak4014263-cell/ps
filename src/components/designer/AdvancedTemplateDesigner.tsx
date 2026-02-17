@@ -202,6 +202,9 @@ export function AdvancedTemplateDesigner({ editTemplate, onBack, projectId, proj
     wordWrap: true,
   });
 
+  // Ref to access handlePreviewData inside addPlaceholder which is defined before handlePreviewData
+  const handlePreviewDataRef = useRef<((data: any) => void) | null>(null);
+
   const queryClient = useQueryClient();
   const { user } = useAuth();
   const activeCanvas = activeSide === 'front' ? fabricCanvas : backFabricCanvas;
@@ -2303,9 +2306,18 @@ export function AdvancedTemplateDesigner({ editTemplate, onBack, projectId, proj
       activeCanvas.setActiveObject(fabricObj);
       activeCanvas.requestRenderAll();
       setActiveTool('select');
+
+      // If we have preview data, apply it to shows live image instead of grey box
+      if (previewData && Object.keys(previewData).length > 0 && handlePreviewDataRef.current) {
+        // Use timeout to ensure object is fully added and accessible
+        setTimeout(() => {
+          handlePreviewDataRef.current?.(previewData);
+        }, 50);
+      }
+
       toast.success(`${type.charAt(0).toUpperCase() + type.slice(1)} placeholder added`);
     }
-  }, [activeCanvas, widthMm, heightMm]);
+  }, [activeCanvas, widthMm, heightMm, previewData]);
 
   // Custom font handler
   const handleAddCustomFont = useCallback(async (file: File, fontName: string) => {
@@ -3475,10 +3487,15 @@ export function AdvancedTemplateDesigner({ editTemplate, onBack, projectId, proj
 
           // Normalize URL if it's a relative path (common with proxied uploads)
           if (url && typeof url === 'string' && !url.startsWith('http') && !url.startsWith('data:') && !url.startsWith('blob:')) {
-            if (!url.startsWith('/')) {
-              url = '/' + url;
+            const backendBase = import.meta.env.VITE_API_URL || 'http://localhost:3001';
+            if (url.startsWith('/')) {
+              url = `${backendBase}${url}`;
+            } else {
+              url = `${backendBase}/${url}`;
             }
           }
+
+          console.log(`[Preview] Loading photo for field "${fieldName}":`, url);
 
           if (url && !obj.data.previewImageAdded) {
             // Try direct load first, fallback to fetch->blob if CORS blocks
@@ -3582,7 +3599,7 @@ export function AdvancedTemplateDesigner({ editTemplate, onBack, projectId, proj
                 }
 
                 if (clipPath) {
-                  img.set('clipPath', clipPath);
+                  img.clipPath = clipPath;
                 }
 
                 img.set({
@@ -3591,6 +3608,9 @@ export function AdvancedTemplateDesigner({ editTemplate, onBack, projectId, proj
                   angle: obj.angle,
                   originX: obj.originX,
                   originY: obj.originY,
+                  scaleX: img.scaleX, // Preserve calculated scale
+                  scaleY: img.scaleY,
+                  objectCaching: false,
                   data: {
                     type: 'preview-photo',
                     field: fieldName,
@@ -3600,15 +3620,36 @@ export function AdvancedTemplateDesigner({ editTemplate, onBack, projectId, proj
                   evented: false,
                 });
 
+                if (img.clipPath) {
+                  img.clipPath.set({
+                    absolutePositioned: false,
+                    originX: 'center',
+                    originY: 'center',
+                    left: 0,
+                    top: 0
+                  });
+                }
+
+                img.setCoords();
+                // Get index of placeholder to maintain Z-order
+                const objIndex = canvas.getObjects().indexOf(obj);
                 canvas.remove(obj);
-                canvas.add(img);
-                canvas.moveObjectTo(img, 0); // Move to bottom so it doesn't cover other elements
+
+                if (objIndex !== -1) {
+                  canvas.insertAt(objIndex, img);
+                } else {
+                  canvas.add(img);
+                }
+
                 obj.data.previewImageAdded = true;
                 canvas.requestRenderAll();
+                canvas.renderAll();
+                console.log(`[Preview] Successfully loaded and applied photo for field "${fieldName}"`);
               } catch (e) {
-                console.warn(`Error processing preview image for ${url}`, e);
+                console.error(`[Preview] Error processing preview image for field "${fieldName}" with URL ${url}:`, e);
               }
-            }).catch(async () => {
+            }).catch(async (err) => {
+              console.warn(`[Preview] Direct load failed for "${fieldName}", trying fetch fallback:`, err);
               try {
                 const resp = await fetch(url);
                 if (!resp.ok) throw new Error(`Fetch failed: ${resp.status}`);
@@ -3734,11 +3775,30 @@ export function AdvancedTemplateDesigner({ editTemplate, onBack, projectId, proj
                     evented: false,
                   });
 
+                  if (img.clipPath) {
+                    img.clipPath.set({
+                      absolutePositioned: false,
+                      originX: 'center',
+                      originY: 'center',
+                      left: 0,
+                      top: 0
+                    });
+                  }
+
+                  img.setCoords();
+                  // Get index of placeholder to maintain Z-order
+                  const objIndex = canvas.getObjects().indexOf(obj);
                   canvas.remove(obj);
-                  canvas.add(img);
-                  canvas.moveObjectTo(img, 0);
+
+                  if (objIndex !== -1) {
+                    canvas.insertAt(objIndex, img);
+                  } else {
+                    canvas.add(img);
+                  }
+
                   obj.data.previewImageAdded = true;
                   canvas.requestRenderAll();
+                  canvas.renderAll();
 
                   // Revoke object URL after a delay to ensure it's loaded
                   setTimeout(() => URL.revokeObjectURL(objectUrl), 2000);
@@ -3750,6 +3810,222 @@ export function AdvancedTemplateDesigner({ editTemplate, onBack, projectId, proj
                 console.warn(`Failed to fetch preview image: ${url}`, e);
               }
             });
+          }
+        }
+        // Handle photo placeholders (non-variable type)
+        else if (obj.data?.isPhotoPlaceholder || obj.data?.type === 'photo-placeholder') {
+          // Prioritize processed photos from AI tools (face crop, background removal)
+          let url = data.cropped_photo_url || data.photo_url || data[placeholderName] || data['photo'] || data['image'] || data['profilePic'];
+
+          // Normalize URL
+          if (url && typeof url === 'string' && !url.startsWith('http') && !url.startsWith('data:') && !url.startsWith('blob:')) {
+            const backendBase = import.meta.env.VITE_API_URL || 'http://localhost:3001';
+            if (url.startsWith('/')) {
+              url = `${backendBase}${url}`;
+            } else {
+              url = `${backendBase}/${url}`;
+            }
+          }
+
+          console.log(`[Preview] Loading photo placeholder "${placeholderName}":`, url);
+
+          if (url && !obj.data.previewImageAdded) {
+            FabricImage.fromURL(url, { crossOrigin: 'anonymous' }).then((img) => {
+              try {
+                const bounds = obj.getBoundingRect();
+                const targetWidth = bounds.width / (canvas.getZoom() || 1);
+                const targetHeight = bounds.height / (canvas.getZoom() || 1);
+                if (img.width && img.height) {
+                  const scale = Math.max(targetWidth / img.width, targetHeight / img.height);
+                  img.scale(scale);
+                }
+
+                // Apply clipping based on placeholder shape
+                const shape = obj.data.shape || 'rect';
+                let clipPath;
+                const minDim = Math.min(targetWidth, targetHeight);
+                const width = targetWidth;
+                const height = targetHeight;
+
+                switch (shape) {
+                  case 'circle':
+                    clipPath = new Circle({
+                      radius: minDim / 2,
+                      originX: 'center',
+                      originY: 'center',
+                      left: 0, top: 0
+                    });
+                    break;
+                  case 'rounded-rect':
+                    clipPath = new Rect({
+                      width: width,
+                      height: height,
+                      rx: Math.min(width, height) * 0.15,
+                      ry: Math.min(width, height) * 0.15,
+                      originX: 'center',
+                      originY: 'center',
+                      left: 0, top: 0
+                    });
+                    break;
+                  default:
+                    clipPath = new Rect({
+                      width: width,
+                      height: height,
+                      originX: 'center',
+                      originY: 'center',
+                      left: 0, top: 0
+                    });
+                    break;
+                }
+
+                if (clipPath) {
+                  img.clipPath = clipPath;
+                }
+
+                img.set({
+                  left: obj.left,
+                  top: obj.top,
+                  angle: obj.angle,
+                  originX: obj.originX,
+                  originY: obj.originY,
+                  data: {
+                    type: 'preview-photo',
+                    field: placeholderName,
+                    previewForObject: obj,
+                  },
+                  selectable: false,
+                  evented: false,
+                });
+
+                const objIndex = canvas.getObjects().indexOf(obj);
+                canvas.remove(obj);
+
+                if (objIndex !== -1) {
+                  canvas.insertAt(objIndex, img);
+                } else {
+                  canvas.add(img);
+                }
+
+                obj.data.previewImageAdded = true;
+                canvas.requestRenderAll();
+                console.log(`[Preview] Successfully loaded photo placeholder "${placeholderName}"`);
+              } catch (e) {
+                console.error(`[Preview] Error processing photo placeholder "${placeholderName}":`, e);
+              }
+            }).catch((err) => {
+              console.error(`[Preview] Failed to load photo placeholder "${placeholderName}":`, err);
+            });
+          }
+        }
+        // Handle masked photos
+        else if ((obj as any).maskedPhoto || (obj as any).type === 'masked-photo') {
+          const config = (obj as any).maskConfig;
+          const binding = config?.variableBinding || (obj as any).variableBinding;
+
+          if (binding) {
+            const field = typeof binding === 'string' ? binding : binding.field;
+            // Prioritize processed photos from AI tools
+            let url = data.cropped_photo_url || data.photo_url || data[field] || data['photo'] || data['image'] || data['profilePic'];
+
+            // Normalize URL
+            if (url && typeof url === 'string' && !url.startsWith('http') && !url.startsWith('data:') && !url.startsWith('blob:')) {
+              const backendBase = import.meta.env.VITE_API_URL || 'http://localhost:3001';
+              if (url.startsWith('/')) {
+                url = `${backendBase}${url}`;
+              } else {
+                url = `${backendBase}/${url}`;
+              }
+            }
+
+            console.log(`[Preview] Loading masked photo for field "${field}":`, url);
+
+            if (url && !obj.data?.previewImageAdded) {
+              // For masked photos in preview, we'll just load the image with the mask applied
+              FabricImage.fromURL(url, { crossOrigin: 'anonymous' }).then((img) => {
+                try {
+                  const targetWidth = (obj as any).width * ((obj as any).scaleX || 1);
+                  const targetHeight = (obj as any).height * ((obj as any).scaleY || 1);
+
+                  if (img.width && img.height) {
+                    const scale = Math.max(targetWidth / img.width, targetHeight / img.height);
+                    img.scale(scale);
+                  }
+
+                  // Apply the mask shape from config
+                  const shape = config?.shape || 'circle';
+                  let clipPath;
+                  const minDim = Math.min(targetWidth, targetHeight);
+
+                  switch (shape) {
+                    case 'circle':
+                      clipPath = new Circle({
+                        radius: minDim / 2,
+                        originX: 'center',
+                        originY: 'center',
+                        left: 0, top: 0
+                      });
+                      break;
+                    case 'rounded-rect':
+                      clipPath = new Rect({
+                        width: targetWidth,
+                        height: targetHeight,
+                        rx: Math.min(targetWidth, targetHeight) * 0.15,
+                        ry: Math.min(targetWidth, targetHeight) * 0.15,
+                        originX: 'center',
+                        originY: 'center',
+                        left: 0, top: 0
+                      });
+                      break;
+                    default:
+                      clipPath = new Rect({
+                        width: targetWidth,
+                        height: targetHeight,
+                        originX: 'center',
+                        originY: 'center',
+                        left: 0, top: 0
+                      });
+                      break;
+                  }
+
+                  if (clipPath) {
+                    img.clipPath = clipPath;
+                  }
+
+                  img.set({
+                    left: (obj as any).left,
+                    top: (obj as any).top,
+                    angle: (obj as any).angle || 0,
+                    originX: (obj as any).originX || 'center',
+                    originY: (obj as any).originY || 'center',
+                    data: {
+                      type: 'preview-photo',
+                      field: field,
+                      previewForObject: obj,
+                    },
+                    selectable: false,
+                    evented: false,
+                  });
+
+                  const objIndex = canvas.getObjects().indexOf(obj);
+                  canvas.remove(obj);
+
+                  if (objIndex !== -1) {
+                    canvas.insertAt(objIndex, img);
+                  } else {
+                    canvas.add(img);
+                  }
+
+                  if (!obj.data) obj.data = {};
+                  obj.data.previewImageAdded = true;
+                  canvas.requestRenderAll();
+                  console.log(`[Preview] Successfully loaded masked photo for field "${field}"`);
+                } catch (e) {
+                  console.error(`[Preview] Error processing masked photo for field "${field}":`, e);
+                }
+              }).catch((err) => {
+                console.error(`[Preview] Failed to load masked photo for field "${field}":`, err);
+              });
+            }
           }
         } else if (obj.data?.type === 'variable-box' && obj.data?.field) {
           const fieldName = obj.data.field;
@@ -3823,6 +4099,11 @@ export function AdvancedTemplateDesigner({ editTemplate, onBack, projectId, proj
       applyToCanvas(backFabricCanvas);
     }
   }, [fabricCanvas, backFabricCanvas, hasBackSide, calculateAutoFontSize]);
+
+  // Sync handlePreviewData to ref for use in addPlaceholder which is defined before handlePreviewData
+  useEffect(() => {
+    handlePreviewDataRef.current = handlePreviewData;
+  }, [handlePreviewData]);
 
   /**
    * Resets preview mode by restoring original variable text and font sizes
@@ -4209,7 +4490,18 @@ export function AdvancedTemplateDesigner({ editTemplate, onBack, projectId, proj
    * Serializes the entire canvas as JSON and stores in page data
    * @returns {void}
    */
-  // Page management handlers
+  // Force reset preview when opening batch panel to ensure templates are clean for record substitution
+  useEffect(() => {
+    if (activeSidebarTab === 'batch' && isPreviewMode) {
+      console.log('[Batch] Resetting preview mode to ensure clean templates for batch processing');
+      handleResetPreview();
+      setIsPreviewMode(false);
+    }
+  }, [activeSidebarTab, isPreviewMode, handleResetPreview]);
+
+  /**
+   * Page Management Handlers - CRUD for template pages
+   */
   const saveCurrentPageState = useCallback(() => {
     if (!fabricCanvas) return;
     setPages(prev => {
@@ -4745,9 +5037,11 @@ export function AdvancedTemplateDesigner({ editTemplate, onBack, projectId, proj
             hasBackSide={hasBackSide}
             widthMm={widthMm}
             heightMm={heightMm}
-            designJson={fabricCanvas?.toObject()}
-            backDesignJson={hasBackSide ? backFabricCanvas?.toObject() : undefined}
+            designJson={fabricCanvas?.toObject(['id', 'name', 'maskedPhoto', 'maskConfig', 'variableBinding', 'data'])}
+            backDesignJson={hasBackSide ? backFabricCanvas?.toObject(['id', 'name', 'maskedPhoto', 'maskConfig', 'variableBinding', 'data']) : undefined}
             category={category}
+            projectId={projectId}
+            vendorId={user?.vendor_id}
             onPreviewRecord={(record) => {
               setPreviewData(record);
               setIsPreviewMode(true);

@@ -8,11 +8,17 @@ echo "🚀 Starting VPS Setup for Crystal Admin"
 # 1. Update and Install System Dependencies
 echo "📦 Installing system dependencies..."
 sudo apt update
-sudo apt install -y nginx nodejs npm mysql-server redis-server python3-pip python3-venv zip unzip curl
+sudo apt install -y nginx mysql-server redis-server python3-pip python3-venv zip unzip curl
 
 # 2. Install PM2 globally
 echo "📦 Installing PM2..."
-sudo npm install -g pm2
+pm2_install_cmd="npm install -g pm2"
+if ! command -v pm2 &> /dev/null; then
+    echo "📦 Installing PM2..."
+    $pm2_install_cmd
+else
+    echo "PM2 already installed"
+fi
 
 # 3. Create App Directory
 echo "📁 Setting up app directory..."
@@ -33,8 +39,14 @@ sudo mysql id_card < MYSQL_SCHEMA_id_card.sql
 
 # 6. Setup Backend (Node.js)
 echo "☕ Setting up Node.js backend..."
+# Node.js dependencies should be installed only if not already present
 cd /var/www/crystal-admin/backend
-npm install --production
+if [ ! -d "node_modules" ]; then
+    echo "📦 Installing backend dependencies..."
+    npm install --production
+else
+    echo "Node modules already installed"
+fi
 # Create .env if not exists (minimal)
 if [ ! -f .env ]; then
   cat <<EOF > .env

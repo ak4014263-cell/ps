@@ -255,11 +255,13 @@ router.post('/upload-project-photo', upload.single('file'), async (req, res) => 
     const filePathOnDisk = path.join(projectPhotosDir, fileName);
     fs.renameSync(req.file.path, filePathOnDisk);
 
-    const publicUrl = `/uploads/project-photos/${projectId}/${fileName}`;
+    // Generate full URL
+    const baseUrl = req.protocol + '://' + req.get('host');
+    const fullUrl = `${baseUrl}/uploads/project-photos/${projectId}/${fileName}`;
 
     return res.json({
       success: true,
-      url: publicUrl,
+      url: fullUrl,
       fileName: fileName,
       projectId: projectId
     });
@@ -341,11 +343,15 @@ router.post('/save-photo', (req, res) => {
       fs.writeFileSync(filePathOnDisk, fileBuffer);
       console.log(`[Save Photo] Saved file to disk: ${filePathOnDisk}`);
 
-      // Save both BLOB (for database) and filename (for URL)
-      const sql = `UPDATE data_records SET ${blobColumn} = ?, ${urlColumn} = ? WHERE id = ?`;
-      await execute(sql, [fileBuffer, photoFileName, recordId]);
+      // Generate full URL
+      const baseUrl = req.protocol + '://' + req.get('host');
+      const fullUrl = `${baseUrl}/uploads/project-photos/${projectId}/${photoFileName}`;
 
-      console.log(`[Save Photo] Saved BLOB to ${blobColumn} and URL to ${urlColumn} (${photoFileName}) for record ${recordId}, project ${projectId}`);
+      // Save both BLOB (for database) and full URL (for easier fetching)
+      const sql = `UPDATE data_records SET ${blobColumn} = ?, ${urlColumn} = ? WHERE id = ?`;
+      await execute(sql, [fileBuffer, fullUrl, recordId]);
+
+      console.log(`[Save Photo] Saved BLOB to ${blobColumn} and full URL to ${urlColumn} (${fullUrl}) for record ${recordId}, project ${projectId}`);
 
       // Clean up temp file
       fs.unlinkSync(req.file.path);
@@ -355,8 +361,8 @@ router.post('/save-photo', (req, res) => {
 
       return res.json({
         success: true,
-        url: publicUrl,
-        photoUrl: publicUrl,
+        url: fullUrl,
+        photoUrl: fullUrl,
         photoType: photoType,
         message: 'Photo saved to database and disk'
       });

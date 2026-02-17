@@ -42,6 +42,7 @@ import {
 } from 'fabric'; // Added Fabric imports
 import { apiService } from '@/lib/api';
 import { MaskedPhotoObject } from './PhotoMaskingModule';
+import { VDPText } from '@/lib/vdpText';
 
 interface DesignerBatchPDFPanelProps {
   canvas: any;
@@ -54,6 +55,7 @@ interface DesignerBatchPDFPanelProps {
   backDesignJson?: any;
   category: string;
   projectId?: string;
+  vendorId?: string;
   onPreviewRecord?: (record: Record<string, string>) => void;
   onClose: () => void;
 }
@@ -77,6 +79,7 @@ export function DesignerBatchPDFPanel({
   backDesignJson,
   category,
   projectId,
+  vendorId,
   onPreviewRecord,
   onClose,
 }: DesignerBatchPDFPanelProps) {
@@ -98,8 +101,8 @@ export function DesignerBatchPDFPanel({
   const effectiveProjectId = projectId || selectedProjectId;
 
   const { data: projectsData } = useQuery({
-    queryKey: ['available-projects-batch'],
-    queryFn: () => apiService.projectsAPI.getAll(),
+    queryKey: ['available-projects-batch', vendorId],
+    queryFn: () => apiService.projectsAPI.getAll({ vendor_id: vendorId }),
     enabled: !projectId, // Only fetch if no project context
   });
 
@@ -136,8 +139,11 @@ export function DesignerBatchPDFPanel({
     const extractFromDesign = (design: any) => {
       if (!design?.objects) return;
       design.objects.forEach((obj: any) => {
-        if (obj.data?.isPhotoPlaceholder || obj.data?.type === 'photo-placeholder') {
-          const name = obj.data?.name || obj.data?.fieldName || 'photo';
+        if (obj.data?.isPhotoPlaceholder ||
+          obj.data?.type === 'photo-placeholder' ||
+          obj.data?.type === 'preview-photo' ||
+          (obj.data?.type === 'variable' && obj.data?.isPhoto)) {
+          const name = obj.data?.field || obj.data?.name || obj.data?.fieldName || 'photo';
           if (!placeholders.includes(name)) {
             placeholders.push(name);
           }
@@ -325,7 +331,7 @@ export function DesignerBatchPDFPanel({
       // Map records to a flat object structure
       const mappedData = records.map((record: any) => {
         const data = typeof record.data_json === 'string' ? JSON.parse(record.data_json) : record.data_json;
-        const backendBase = 'http://localhost:3001';
+        const backendBase = import.meta.env.VITE_API_URL || 'http://localhost:3001';
 
         let photoUrl = record.cropped_photo_url || record.photo_url || data.profilePic || data.photo || data.image;
 
@@ -337,15 +343,16 @@ export function DesignerBatchPDFPanel({
             // Assume it's a file in project-photos
             photoUrl = `${backendBase}/uploads/project-photos/${effectiveProjectId}/${photoUrl}`;
           }
-
         }
+
+        console.log(`[BatchPDF] Resolved photo URL for record ${record.id}:`, photoUrl);
 
         return {
           ...data,
           photo: photoUrl, // Standard field for placeholders
           profilePic: photoUrl,
-          photo_url: record.photo_url,
-          cropped_photo_url: record.cropped_photo_url,
+          photo_url: photoUrl,
+          cropped_photo_url: photoUrl,
           recordId: record.id
         };
       });
@@ -645,19 +652,37 @@ export function DesignerBatchPDFPanel({
     const objects = fCanvas.getObjects();
     const imageLoads: Promise<void>[] = [];
 
+    // Helper function to resolve photo URL with proper backend base
+    const resolvePhotoUrl = (url: string | null | undefined): string | null => {
+      if (!url) return null;
+
+      // If already absolute URL or data URL, return as is
+      if (url.startsWith('http') || url.startsWith('data:')) {
+        return url;
+      }
+
+      // Otherwise prepend backend base URL
+      const backendBase = import.meta.env.VITE_API_URL || 'http://localhost:3001';
+      if (url.startsWith('/')) {
+        return `${backendBase}${url}`;
+      }
+      return `${backendBase}/${url}`;
+    };
+
     for (const obj of objects) {
       if (!obj) continue;
 
       // Handle variable replacement in text
       if (obj.type === 'textbox' || obj.type === 'text' || obj.type === 'i-text') {
-        let text = (obj as any).text || '';
+        const dataObj = (obj as any).data || {};
+        let text = dataObj.originalText || (obj as any).text || '';
         // Simple variable replacement: {{field}}
         // We can use the simple replacement logic or regex
         let modified = false;
 
         // Check if strict variable type
-        if ((obj as any).data?.type === 'variable' && (obj as any).data?.field) {
-          const field = (obj as any).data.field;
+        if ((dataObj.type === 'variable' || dataObj.type === 'variable-text') && dataObj.field) {
+          const field = dataObj.field;
           const val = recordData[field] || '';
           text = String(val);
           modified = true;
@@ -682,15 +707,40 @@ export function DesignerBatchPDFPanel({
           }
         }
       }
+      // Handle VDP Text Tool
+      else if (obj.type === 'vdp-text') {
+        const vdp = obj as any;
+        let text = vdp.textContent || '';
+        let modified = false;
+
+        const updatedText = text.replace(/\{\{([^}]+)\}\}/g, (match: string, p1: string) => {
+          const field = p1.trim();
+          if (recordData[field] !== undefined) {
+            modified = true;
+            return String(recordData[field]);
+          }
+          return match;
+        });
+
+        if (modified && typeof vdp.setText === 'function') {
+          vdp.setText(updatedText);
+        }
+      }
 
       // Handle Photo/Image replacement
-      // 1. Check for explicit photo placeholders or variable photos
+      // 1. Check for explicit photo placeholders, variable photos, or existing preview photos
       if ((obj as any).data?.isPhotoPlaceholder ||
         (obj as any).data?.type === 'photo-placeholder' ||
+        (obj as any).data?.type === 'preview-photo' ||
         ((obj as any).data?.type === 'variable' && (obj as any).data?.isPhoto)) {
 
-        const placeholderName = (obj as any).data?.name || (obj as any).data?.field || (obj as any).data?.fieldName || 'photo';
-        const photoUrl = photoUrls[placeholderName];
+        const placeholderName = (obj as any).data?.field || (obj as any).data?.name || (obj as any).data?.fieldName || 'photo';
+        let photoUrl = photoUrls[placeholderName];
+
+        // Resolve the photo URL
+        photoUrl = resolvePhotoUrl(photoUrl);
+
+        console.log(`[Batch] Photo placeholder "${placeholderName}" resolved URL:`, photoUrl);
 
         if (photoUrl) {
           imageLoads.push(new Promise<void>((resolve) => {
@@ -698,56 +748,84 @@ export function DesignerBatchPDFPanel({
             const existingClipPath = originalObj.clipPath; // Preserve clip path (e.g. circle mask)
 
             FabricImage.fromURL(photoUrl, { crossOrigin: 'anonymous' }).then((img: FabricImage) => {
+              console.log(`[Batch] Successfully loaded photo for placeholder "${placeholderName}"`);
+
               // Match dimensions and position
               // We need to scale the image to 'cover' the placeholder box
-              const scaleX = (originalObj.width * originalObj.scaleX) / img.width;
-              const scaleY = (originalObj.height * originalObj.scaleY) / img.height;
+              const targetWidth = originalObj.width * (originalObj.scaleX || 1);
+              const targetHeight = originalObj.height * (originalObj.scaleY || 1);
+              const scaleX = targetWidth / (img.width || 1);
+              const scaleY = targetHeight / (img.height || 1);
               const scale = Math.max(scaleX, scaleY); // 'Cover' mode
 
               img.set({
-                left: originalObj.left, // Center alignment logic could be added here
+                left: originalObj.left,
                 top: originalObj.top,
                 scaleX: scale,
                 scaleY: scale,
                 opacity: 1,
-                originX: originalObj.originX,
-                originY: originalObj.originY,
+                originX: originalObj.originX || 'left',
+                originY: originalObj.originY || 'top',
+                angle: originalObj.angle || 0,
+                objectCaching: false,
                 clipPath: originalObj.clipPath || (originalObj.data?.shape && originalObj.data.shape !== 'rect' ? generateClipPath(originalObj.data.shape, originalObj.width, originalObj.height) : undefined)
               });
 
-              // If original had a clip path, we might need to adjust content? 
-              // Actually if we replace the object, we just give the new image the same clipPath.
+              if (img.clipPath) {
+                img.clipPath.set({
+                  absolutePositioned: false,
+                  originX: 'center',
+                  originY: 'center',
+                  left: 0,
+                  top: 0
+                });
+              }
 
+              img.setCoords();
               fCanvas.remove(originalObj);
               fCanvas.add(img);
-              // Send to same stack level?
-              // Simple approach: just add it. Advanced: insertAt index.
               resolve();
-            }).catch(() => resolve());
+            }).catch((err) => {
+              console.error(`[Batch] Failed to load photo for placeholder "${placeholderName}":`, err);
+              resolve();
+            });
           }));
+        } else {
+          console.warn(`[Batch] No photo URL found for placeholder: ${placeholderName}`);
         }
       }
       // 2. Check for generic images with variableName
       else if (obj.type === 'image' && (obj as any).data?.variableName) {
         const varName = (obj as any).data.variableName;
-        const photoUrl = photoUrls[varName];
+        let photoUrl = photoUrls[varName];
+        photoUrl = resolvePhotoUrl(photoUrl);
+
+        console.log(`[Batch] Image variable "${varName}" resolved URL:`, photoUrl);
+
         if (photoUrl) {
           imageLoads.push(new Promise<void>((resolve) => {
             const originalObj = obj as any;
             FabricImage.fromURL(photoUrl, { crossOrigin: 'anonymous' }).then((img: FabricImage) => {
+              console.log(`[Batch] Successfully loaded image for variable "${varName}"`);
+
               img.set({
                 left: originalObj.left,
                 top: originalObj.top,
-                scaleX: originalObj.scaleX,
-                scaleY: originalObj.scaleY,
-                angle: originalObj.angle,
-                originX: originalObj.originX,
-                originY: originalObj.originY,
+                scaleX: originalObj.scaleX || 1,
+                scaleY: originalObj.scaleY || 1,
+                angle: originalObj.angle || 0,
+                originX: originalObj.originX || 'left',
+                originY: originalObj.originY || 'top',
+                objectCaching: false
               });
+              img.setCoords();
               fCanvas.remove(originalObj);
               fCanvas.add(img);
               resolve();
-            }).catch(() => resolve());
+            }).catch((err) => {
+              console.error(`[Batch] Failed to load image for variable "${varName}":`, err);
+              resolve();
+            });
           }));
         }
       }
@@ -756,56 +834,128 @@ export function DesignerBatchPDFPanel({
         const config = (obj as any).maskConfig;
         const binding = config?.variableBinding || (obj as any).variableBinding;
 
-        console.log(`[Batch] Found masked photo object:`, { binding, config });
+        console.log(`[Batch] Found masked photo object:`, { binding, config, objData: (obj as any).data });
 
         if (binding) {
           const field = typeof binding === 'string' ? binding : binding.field;
-          const photoUrl = photoUrls[field];
+          let photoUrl = photoUrls[field];
+          photoUrl = resolvePhotoUrl(photoUrl);
 
-          console.log(`[Batch] Masked photo binding field: ${field}, resolved URL:`, photoUrl);
+          console.log(`[Batch] Masked photo binding field: "${field}", resolved URL:`, photoUrl);
 
           if (photoUrl) {
             imageLoads.push(new Promise<void>((resolve) => {
               const originalObj = obj as any;
-              // We use MaskedPhotoObject to render a new image with the new source
+
+              // Create a new MaskedPhotoObject with the photo URL
+              // Ensure we pass 'size' for the mask to render correctly
               const maskedObj = new MaskedPhotoObject({
                 ...config,
-                photoSrc: photoUrl
+                photoSrc: photoUrl,
+                size: config?.size || originalObj.width || 100,
+                width: config?.width || originalObj.width || 100,
+                height: config?.height || originalObj.height || 100,
               });
 
               console.log(`[Batch] Attempting to render masked object with url: ${photoUrl}`);
 
               maskedObj.renderToFabric({ Image: FabricImage }, {}).then((newImg: any) => {
-                console.log(`[Batch] Successfully rendered masked object for field ${field}`);
+                console.log(`[Batch] Successfully rendered masked object for field "${field}"`);
+
                 newImg.set({
                   left: originalObj.left,
                   top: originalObj.top,
-                  scaleX: originalObj.scaleX,
-                  scaleY: originalObj.scaleY,
-                  angle: originalObj.angle,
-                  originX: originalObj.originX,
-                  originY: originalObj.originY,
+                  scaleX: originalObj.scaleX || 1,
+                  scaleY: originalObj.scaleY || 1,
+                  angle: originalObj.angle || 0,
+                  originX: originalObj.originX || 'left',
+                  originY: originalObj.originY || 'top',
+                  selectable: false,
+                  evented: false,
+                  objectCaching: false
                 });
 
+                newImg.setCoords();
                 fCanvas.remove(originalObj);
                 fCanvas.add(newImg);
                 resolve();
               }).catch((err: any) => {
-                console.error(`[Batch] Failed to render masked object:`, err);
+                console.error(`[Batch] Failed to render masked object for field "${field}":`, err);
                 resolve();
               });
             }));
           } else {
-            console.warn(`[Batch] No photo URL found for field: ${field}`);
+            console.warn(`[Batch] No photo URL found for masked photo field: ${field}`);
           }
+        } else {
+          console.warn(`[Batch] Masked photo object has no binding:`, obj);
         }
+      }
+      // 4. Handle Barcode/QRCode Dynamic Generation
+      else if ((obj as any).data?.isBarcode || (obj as any).data?.isQRCode) {
+        const dataObj = (obj as any).data;
+        const type = dataObj.isBarcode ? 'barcode' : 'qrcode';
+        const fieldMapping = dataObj.dataField || (dataObj.isBarcode ? 'barcode' : 'qrcode');
+
+        let rawValue = fieldMapping;
+        // Resolve variable expression if present
+        const resolvedValue = rawValue.replace(/\{\{([^}]+)\}\}/g, (match: string, p1: string) => {
+          const field = p1.trim();
+          return recordData[field] !== undefined ? String(recordData[field]) : match;
+        });
+
+        // Regenerate image
+        imageLoads.push(new Promise<void>(async (resolve) => {
+          try {
+            const { generateBarcodeDataUrl, generateQrCodeDataUrl } = await import('@/lib/codeGenerators');
+            let newDataUrl: string;
+
+            if (dataObj.isBarcode) {
+              newDataUrl = await generateBarcodeDataUrl(resolvedValue, {
+                format: dataObj.barcodeFormat || 'CODE128',
+                width: dataObj.barcodeWidth || 2,
+                height: dataObj.barcodeHeight || 50,
+                displayValue: dataObj.showValue !== false,
+              });
+            } else {
+              newDataUrl = await generateQrCodeDataUrl(resolvedValue, {
+                margin: dataObj.qrMargin || 2,
+              });
+            }
+
+            const originalObj = obj as any;
+            FabricImage.fromURL(newDataUrl, { crossOrigin: 'anonymous' }).then((img: FabricImage) => {
+              img.set({
+                left: originalObj.left,
+                top: originalObj.top,
+                scaleX: originalObj.scaleX || 1,
+                scaleY: originalObj.scaleY || 1,
+                angle: originalObj.angle || 0,
+                originX: originalObj.originX || 'left',
+                originY: originalObj.originY || 'top',
+                objectCaching: false
+              });
+              img.setCoords();
+              fCanvas.remove(originalObj);
+              fCanvas.add(img);
+              resolve();
+            });
+          } catch (e) {
+            console.error(`[Batch] Failed to regenerate ${type} for value "${resolvedValue}":`, e);
+            resolve();
+          }
+        }));
       }
     }
 
     if (imageLoads.length > 0) {
+      console.log(`[Batch] Waiting for ${imageLoads.length} images to load...`);
       await Promise.all(imageLoads);
+      console.log(`[Batch] All images loaded successfully`);
     }
+
     fCanvas.renderAll();
+    fCanvas.requestRenderAll();
   };
 
   const handleGenerate = async (previewMode = false) => {
@@ -836,20 +986,16 @@ export function DesignerBatchPDFPanel({
       // Fabric canvas usually runs at 96 DPI (3.78 px/mm). We should match the export resolution.
       const exportMultiplier = 300 / 96; // ~3.125
 
-      // Get canvas JSONs
-      const customProps = ['id', 'name', 'maskedPhoto', 'maskConfig', 'variableBinding', 'data'];
-      const design = canvas?.toObject(customProps);
-      // Ensure width/height are in the JSON for the loader
-      if (design) {
-        design.width = canvas.getWidth();
-        design.height = canvas.getHeight();
-      }
+      // Use the design JSON passed from props to ensure we have the templates
+      // NOT the current canvas which might be in preview mode
+      const design = designJson;
+      const backDesign = hasBackSide && backDesignJson ? backDesignJson : null;
 
-      const backDesign = hasBackSide && backCanvas ? backCanvas.toObject(customProps) : null;
-      if (backDesign && backCanvas) {
-        backDesign.width = backCanvas.getWidth();
-        backDesign.height = backCanvas.getHeight();
-      }
+      console.log('[Batch] Starting generation with design:', {
+        hasDesign: !!design,
+        objectsCount: design?.objects?.length,
+        isBackAvailable: !!backDesign
+      });
 
       // We will create hidden canvases to render each card
       // We use the same dimensions as the screen canvas but render to higher res image
@@ -917,21 +1063,21 @@ export function DesignerBatchPDFPanel({
             photoUrl = uploadedPhotos.get(val) || uploadedPhotos.get(val.toLowerCase()) || uploadedPhotos.get(val.replace(/\.[^.]+$/, ''));
           }
 
-          // 2. Fallback: Check for URL in record data (loaded from Project)
+          // 2. Fallback: Check for URL in record data (loaded from Project or CSV)
           if (!photoUrl) {
-            // First check specific mapped column if it contains a URL
-            if (mappedColumn && row[mappedColumn] && (String(row[mappedColumn]).startsWith('http') || String(row[mappedColumn]).startsWith('data:'))) {
-              photoUrl = String(row[mappedColumn]);
-            }
-            // Then check standard fields populated by handleLoadFromProject
-            else if (row.photo && (String(row.photo).startsWith('http') || String(row.photo).startsWith('data:'))) {
-              photoUrl = row.photo;
-            } else if (row.profilePic && (String(row.profilePic).startsWith('http') || String(row.profilePic).startsWith('data:'))) {
-              photoUrl = row.profilePic;
-            } else if (row.cropped_photo_url) {
+            // Priority: AI Processed > Explicitly mapped > Default fields
+            if (row.cropped_photo_url) {
               photoUrl = row.cropped_photo_url;
             } else if (row.photo_url) {
               photoUrl = row.photo_url;
+            } else if (mappedColumn && row[mappedColumn]) {
+              photoUrl = String(row[mappedColumn]);
+            } else if (row.photo) {
+              photoUrl = row.photo;
+            } else if (row.profilePic) {
+              photoUrl = row.profilePic;
+            } else if (row.image) {
+              photoUrl = row.image;
             }
           }
 
@@ -952,7 +1098,10 @@ export function DesignerBatchPDFPanel({
           }
 
           if (photoUrl) {
+            console.log(`[Batch] Found photo for placeholder "${placeholder}":`, photoUrl);
             photoUrls[placeholder] = photoUrl;
+          } else {
+            console.warn(`[Batch] Missing photo for placeholder "${placeholder}" in record ${i}`);
           }
         });
 
@@ -1120,7 +1269,7 @@ export function DesignerBatchPDFPanel({
   };
 
   return (
-    <div className="absolute left-12 top-0 bottom-0 w-80 bg-card border-r shadow-lg z-20 flex flex-col">
+    <div className="absolute inset-y-0 left-0 sm:left-12 w-full sm:w-80 bg-card border-r shadow-xl z-30 sm:z-20 flex flex-col transition-all duration-300">
       <div className="flex items-center justify-between p-3 border-b">
         <h3 className="font-semibold text-sm flex items-center gap-2">
           <FileText className="h-4 w-4" />

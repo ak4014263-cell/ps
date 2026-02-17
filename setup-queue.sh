@@ -29,7 +29,12 @@ echo -e "${GREEN}✓ Node.js $NODE_VERSION found${NC}"
 # 3. Install backend dependencies
 echo -e "${YELLOW}[3/6]${NC} Installing backend dependencies..."
 cd backend
-npm install bull redis express-rate-limit rate-limit-redis node-fetch
+if [ ! -d "node_modules" ]; then
+    echo "📦 Installing backend queue dependencies..."
+    npm install bull redis express-rate-limit rate-limit-redis node-fetch
+else
+    echo "Queue node modules already installed"
+fi
 if [ $? -eq 0 ]; then
     echo -e "${GREEN}✓ Dependencies installed${NC}"
 else
