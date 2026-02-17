@@ -16,7 +16,7 @@ fi
 # Variables (modify these)
 APP_DIR="/app/crystal-admin"
 APP_USER="deployuser"
-GITHUB_REPO_URL="https://github.com/your-username/crystal-admin.git"
+GITHUB_REPO_URL="https://github.com/ak4014263-cell/ps.git"
 GITHUB_BRANCH="main"
 
 # Detect OS

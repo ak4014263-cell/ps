@@ -40,6 +40,18 @@ import { setupAutoFontSizeListeners, applyAutoFontSize } from '@/lib/autoFontSiz
 import { VDPText, VDPFunctionType } from '@/lib/vdpText';
 import { DesignerVDPPanel } from './DesignerVDPPanel';
 
+// Helper to generate UUIDs (fallback for insecure contexts where crypto.randomUUID is unavailable)
+function generateUUID() {
+  if (typeof window !== 'undefined' && window.crypto && window.crypto.randomUUID) {
+    return window.crypto.randomUUID();
+  }
+  return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, function (c) {
+    const r = Math.random() * 16 | 0;
+    const v = c === 'x' ? r : (r & 0x3 | 0x8);
+    return v.toString(16);
+  });
+}
+
 const PRESET_SIZES = [
   { name: 'ID Card (CR80)', width: 85.6, height: 53.98 },
   { name: 'ID Card Portrait', width: 53.98, height: 85.6 },
@@ -188,7 +200,7 @@ export function AdvancedTemplateDesigner({ editTemplate, onBack, projectId, proj
 
   // Multi-page state
   const [pages, setPages] = useState<PageData[]>([
-    { id: crypto.randomUUID(), name: 'Page 1', designJson: null }
+    { id: generateUUID(), name: 'Page 1', designJson: null }
   ]);
   const [currentPageIndex, setCurrentPageIndex] = useState(0);
 
@@ -649,14 +661,14 @@ export function AdvancedTemplateDesigner({ editTemplate, onBack, projectId, proj
       // Update associated text object for variable boxes
       if (movingObj.data?.type === 'variable-box') {
         const padding = movingObj.data?.padding ?? 8;
-        const textObj = movingObj.data?.textObject || fabricCanvas.getObjects().find((o: any) => o?.data?.type === 'variable-text' && o?.data?.field === movingObj.data?.field);
+        const movingTextObj = movingObj.data?.textObject || fabricCanvas.getObjects().find((o: any) => o?.data?.type === 'variable-text' && o?.data?.field === movingObj.data?.field);
 
-        if (textObj) {
-          textObj.set({
+        if (movingTextObj) {
+          movingTextObj.set({
             left: (movingObj.left || 0) + padding,
             top: (movingObj.top || 0) + padding,
           });
-          textObj.setCoords();
+          movingTextObj.setCoords();
         }
       }
 
@@ -800,18 +812,18 @@ export function AdvancedTemplateDesigner({ editTemplate, onBack, projectId, proj
         const constrainedHeight = Math.max(minHeight, currentHeight);
 
         // Find the associated text object (prefer stored ref)
-        let textObj: any = obj.data?.textObject;
-        if (!textObj) {
-          textObj = fabricCanvas.getObjects().find((o: any) => o?.data?.type === 'variable-text' && o?.data?.field === obj.data?.field);
+        let scalingTextObj: any = obj.data?.textObject;
+        if (!scalingTextObj) {
+          scalingTextObj = fabricCanvas.getObjects().find((o: any) => o?.data?.type === 'variable-text' && o?.data?.field === obj.data?.field);
         }
 
         // Apply text resizing based on CURRENT visual dimensions (width * scale) without resetting scale on the box yet
         // This prevents "fighting" with the active transform
-        if (textObj) {
+        if (scalingTextObj) {
           const textWidth = Math.max(constrainedWidth - padding * 2, 20);
-          const textHeight = Math.max(constrainedHeight - padding * 2, (textObj.data?.originalFontSize || 14));
+          const textHeight = Math.max(constrainedHeight - padding * 2, (scalingTextObj.data?.originalFontSize || 14));
 
-          textObj.set({
+          scalingTextObj.set({
             left: (obj.left || 0) + padding,
             top: (obj.top || 0) + padding,
             width: textWidth,
@@ -820,8 +832,8 @@ export function AdvancedTemplateDesigner({ editTemplate, onBack, projectId, proj
             breakWords: true,
           });
           // Update clipping path to match new dimensions
-          if ((textObj as any).clipPath) {
-            (textObj as any).clipPath.set({
+          if ((scalingTextObj as any).clipPath) {
+            (scalingTextObj as any).clipPath.set({
               width: textWidth,
               height: textHeight,
             });
@@ -988,22 +1000,22 @@ export function AdvancedTemplateDesigner({ editTemplate, onBack, projectId, proj
 
         // Refresh text position to match normalized box
         const padding = obj.data?.padding ?? 8;
-        const textObj = obj.data?.textObject || fabricCanvas.getObjects().find((o: any) => o?.data?.type === 'variable-text' && o?.data?.field === obj.data?.field);
+        const modifiedTextObj = obj.data?.textObject || fabricCanvas.getObjects().find((o: any) => o?.data?.type === 'variable-text' && o?.data?.field === obj.data?.field);
 
-        if (textObj) {
+        if (modifiedTextObj) {
           const textWidth = Math.max(newWidth - padding * 2, 20);
-          const textHeight = Math.max(newHeight - padding * 2, (textObj.data?.originalFontSize || 14));
+          const textHeight = Math.max(newHeight - padding * 2, (modifiedTextObj.data?.originalFontSize || 14));
 
-          textObj.set({
+          modifiedTextObj.set({
             left: (obj.left || 0) + padding,
             top: (obj.top || 0) + padding,
             width: textWidth,
             height: textHeight
           });
-          textObj.setCoords();
+          modifiedTextObj.setCoords();
 
-          if (textObj.clipPath) {
-            textObj.clipPath.set({
+          if (modifiedTextObj.clipPath) {
+            modifiedTextObj.clipPath.set({
               width: textWidth,
               height: textHeight
             });
@@ -1070,7 +1082,7 @@ export function AdvancedTemplateDesigner({ editTemplate, onBack, projectId, proj
         if (designJson.__pages && Array.isArray(designJson.__pages)) {
           // Load pages from saved data
           const loadedPages: PageData[] = designJson.__pages.map((p: any) => ({
-            id: p.id || crypto.randomUUID(),
+            id: p.id || generateUUID(),
             name: p.name || 'Page',
             designJson: p.designJson,
           }));
@@ -1104,7 +1116,7 @@ export function AdvancedTemplateDesigner({ editTemplate, onBack, projectId, proj
           // Legacy single-page template - create a single page from it
           const cleanDesign = { ...designJson };
           delete cleanDesign.__pages;
-          setPages([{ id: crypto.randomUUID(), name: 'Page 1', designJson: cleanDesign }]);
+          setPages([{ id: generateUUID(), name: 'Page 1', designJson: cleanDesign }]);
           setCurrentPageIndex(0);
 
           fabricCanvas.loadFromJSON(cleanDesign).then(() => {
@@ -2868,7 +2880,31 @@ export function AdvancedTemplateDesigner({ editTemplate, onBack, projectId, proj
   const handleDelete = useCallback(() => {
     if (!activeCanvas) return;
     const activeObjects = activeCanvas.getActiveObjects();
-    activeObjects.forEach((obj) => activeCanvas.remove(obj));
+
+    activeObjects.forEach((obj: any) => {
+      activeCanvas.remove(obj);
+
+      // If deleting a variable-box, find and remove associated text object
+      if (obj.data?.type === 'variable-box' && obj.data?.field) {
+        const textObj = activeCanvas.getObjects().find((o: any) =>
+          o.data?.type === 'variable-text' &&
+          o.data?.field === obj.data.field
+        );
+        if (textObj) {
+          activeCanvas.remove(textObj);
+        }
+      }
+
+      // If deleting a variable-text (rare, since not selectable), remove parent box
+      if (obj.data?.type === 'variable-text' && obj.data?.parentBox) {
+        // Find parent box in canvas objects just in case the reference is stale
+        const parentBox = activeCanvas.getObjects().find((o: any) => o === obj.data.parentBox);
+        if (parentBox) {
+          activeCanvas.remove(parentBox);
+        }
+      }
+    });
+
     activeCanvas.discardActiveObject();
     activeCanvas.requestRenderAll();
     setSelectedObject(null);
@@ -3814,8 +3850,9 @@ export function AdvancedTemplateDesigner({ editTemplate, onBack, projectId, proj
         }
         // Handle photo placeholders (non-variable type)
         else if (obj.data?.isPhotoPlaceholder || obj.data?.type === 'photo-placeholder') {
+          const fieldName = obj.data?.field || 'photo';
           // Prioritize processed photos from AI tools (face crop, background removal)
-          let url = data.cropped_photo_url || data.photo_url || data[placeholderName] || data['photo'] || data['image'] || data['profilePic'];
+          let url = data['cropped_photo_url'] || data['photo_url'] || data[fieldName] || data['photo'] || data['image'] || data['profilePic'];
 
           // Normalize URL
           if (url && typeof url === 'string' && !url.startsWith('http') && !url.startsWith('data:') && !url.startsWith('blob:')) {
@@ -3827,7 +3864,7 @@ export function AdvancedTemplateDesigner({ editTemplate, onBack, projectId, proj
             }
           }
 
-          console.log(`[Preview] Loading photo placeholder "${placeholderName}":`, url);
+          console.log(`[Preview] Loading photo placeholder "${fieldName}":`, url);
 
           if (url && !obj.data.previewImageAdded) {
             FabricImage.fromURL(url, { crossOrigin: 'anonymous' }).then((img) => {
@@ -3890,7 +3927,7 @@ export function AdvancedTemplateDesigner({ editTemplate, onBack, projectId, proj
                   originY: obj.originY,
                   data: {
                     type: 'preview-photo',
-                    field: placeholderName,
+                    field: fieldName,
                     previewForObject: obj,
                   },
                   selectable: false,
@@ -3908,12 +3945,12 @@ export function AdvancedTemplateDesigner({ editTemplate, onBack, projectId, proj
 
                 obj.data.previewImageAdded = true;
                 canvas.requestRenderAll();
-                console.log(`[Preview] Successfully loaded photo placeholder "${placeholderName}"`);
+                console.log(`[Preview] Successfully loaded photo placeholder "${fieldName}"`);
               } catch (e) {
-                console.error(`[Preview] Error processing photo placeholder "${placeholderName}":`, e);
+                console.error(`[Preview] Error processing photo placeholder "${fieldName}":`, e);
               }
             }).catch((err) => {
-              console.error(`[Preview] Failed to load photo placeholder "${placeholderName}":`, err);
+              console.error(`[Preview] Failed to load photo placeholder "${fieldName}":`, err);
             });
           }
         }
@@ -4030,36 +4067,36 @@ export function AdvancedTemplateDesigner({ editTemplate, onBack, projectId, proj
         } else if (obj.data?.type === 'variable-box' && obj.data?.field) {
           const fieldName = obj.data.field;
           // Find the associated text object
-          const textObj = canvas.getObjects().find((o: any) =>
+          const previewTextObj = canvas.getObjects().find((o: any) =>
             o.data?.type === 'variable-text' &&
             o.data?.field === fieldName &&
             o.data?.parentBox === obj
           );
 
-          if (textObj) {
+          if (previewTextObj) {
             // Store original text if not already stored
-            if (!(textObj as any).data) (textObj as any).data = {};
-            if (!(textObj as any).data.originalText) {
-              (textObj as any).data.originalText = (textObj as any).text;
+            if (!(previewTextObj as any).data) (previewTextObj as any).data = {};
+            if (!(previewTextObj as any).data.originalText) {
+              (previewTextObj as any).data.originalText = (previewTextObj as any).text;
             }
-            if (!(textObj as any).data.originalFontSize) {
-              (textObj as any).data.originalFontSize = (textObj as any).fontSize;
+            if (!(previewTextObj as any).data.originalFontSize) {
+              (previewTextObj as any).data.originalFontSize = (previewTextObj as any).fontSize;
             }
 
             let displayText = String(data[fieldName] || data[Object.keys(data).find(k => k.toLowerCase() === fieldName.toLowerCase()) || ''] || '');
 
             // Apply text case transformation if set
-            if ((textObj as any).data?.textCase === 'uppercase') {
+            if ((previewTextObj as any).data?.textCase === 'uppercase') {
               displayText = displayText.toUpperCase();
-            } else if ((textObj as any).data?.textCase === 'lowercase') {
+            } else if ((previewTextObj as any).data?.textCase === 'lowercase') {
               displayText = displayText.toLowerCase();
-            } else if ((textObj as any).data?.textCase === 'capitalize') {
+            } else if ((previewTextObj as any).data?.textCase === 'capitalize') {
               displayText = displayText.split(' ').map((w: string) =>
                 w.charAt(0).toUpperCase() + w.slice(1).toLowerCase()
               ).join(' ');
             }
 
-            textObj.set('text', displayText);
+            previewTextObj.set('text', displayText);
             canvas.requestRenderAll();
           }
         } else if (obj.type === 'textbox' && obj.text) {
@@ -4141,17 +4178,17 @@ export function AdvancedTemplateDesigner({ editTemplate, onBack, projectId, proj
       // Handle variable boxes
       if (obj.data?.type === 'variable-box' && obj.data?.field) {
         // Find the associated text object
-        const textObj = activeCanvas.getObjects().find((o: any) =>
+        const resetTextObj = activeCanvas.getObjects().find((o: any) =>
           o.data?.type === 'variable-text' &&
           o.data?.field === obj.data.field &&
           o.data?.parentBox === obj
         );
 
-        if (textObj && (textObj as any).data?.originalText) {
-          textObj.set('text', (textObj as any).data.originalText);
+        if (resetTextObj && (resetTextObj as any).data?.originalText) {
+          resetTextObj.set('text', (resetTextObj as any).data.originalText);
           // Restore original font size if it was changed
-          if ((textObj as any).data.originalFontSize) {
-            textObj.set('fontSize', (textObj as any).data.originalFontSize);
+          if ((resetTextObj as any).data.originalFontSize) {
+            resetTextObj.set('fontSize', (resetTextObj as any).data.originalFontSize);
           }
         }
       } else if (obj.type === 'textbox' && (obj as any).data?.originalText) {
@@ -4566,7 +4603,7 @@ export function AdvancedTemplateDesigner({ editTemplate, onBack, projectId, proj
 
     // Create new page
     const newPage: PageData = {
-      id: crypto.randomUUID(),
+      id: generateUUID(),
       name: `Page ${pages.length + 1}`,
       designJson: null,
     };
@@ -4610,7 +4647,7 @@ export function AdvancedTemplateDesigner({ editTemplate, onBack, projectId, proj
 
     const sourcePage = pages[index];
     const duplicatedPage: PageData = {
-      id: crypto.randomUUID(),
+      id: generateUUID(),
       name: `${sourcePage.name} (Copy)`,
       designJson: sourcePage.designJson ? JSON.parse(JSON.stringify(sourcePage.designJson)) : null,
     };

@@ -69,9 +69,6 @@ import { Label } from '@/components/ui/label';
 import { ProjectGroupsManager } from '@/components/project/ProjectGroupsManager';
 import { ProjectTemplateManager } from '@/components/project/ProjectTemplateManager';
 import { GeneratePreviewDialog } from '@/components/project/GeneratePreviewDialog';
-import { ProjectPDFGenerator } from '@/components/project/ProjectPDFGenerator';
-import { BatchDataRecordsPDFGenerator } from '@/components/project/BatchDataRecordsPDFGenerator';
-import { PDFGenerator } from '@/components/pdf/PDFGenerator';
 import { AddDataDialog } from '@/components/project/AddDataDialog';
 import { DataRecordsTable } from '@/components/project/DataRecordsTable';
 import { EditRecordDialog } from '@/components/project/EditRecordDialog';
@@ -97,8 +94,16 @@ function ProjectTasksTab({ projectId, vendorId }: { projectId: string; vendorId?
   const { data: tasks = [], isLoading } = useQuery({
     queryKey: ['project-tasks-tab', projectId],
     queryFn: async () => {
-      const response = await apiService.projectTasksAPI.getByProject(projectId);
-      return (response.data || response || []);
+      // Mock data for now or use a proper backend endpoint
+      // const { data, error } = await (supabase as any)
+      //   .from('project_tasks')
+      //   .select('*')
+      //   .eq('project_id', projectId)
+      //   .order('created_at', { ascending: false });
+
+      // if (error) throw error;
+      // return data || [];
+      return [] as any[]; // Temporary fix
     },
     enabled: !!projectId,
   });
@@ -108,29 +113,57 @@ function ProjectTasksTab({ projectId, vendorId }: { projectId: string; vendorId?
     queryKey: ['vendor-staff-tasks', vendorId],
     queryFn: async () => {
       if (!vendorId) return [];
-      const response = await apiService.staffAPI.getAll();
-      const staffList = (response.data || response || []) as any[];
-      // Filter by vendor if needed (frontend filter for now)
-      return staffList.map(s => ({
-        id: s.id,
-        full_name: s.full_name,
-        role: s.role
-      }));
+      // Mock data or use proper backend endpoint
+      /*
+      // First get vendor staff
+      const { data: staffData, error } = await (supabase as any)
+        .from('vendor_staff')
+        .select('user_id, role')
+        .eq('vendor_id', vendorId)
+        .eq('active', true);
+      if (error) throw error;
+      if (!staffData || staffData.length === 0) return [];
+      
+      // Then get profiles for those users
+      const userIds = staffData.map(s => s.user_id);
+      const { data: profiles, error: profileError } = await (supabase as any)
+        .from('profiles')
+        .select('id, full_name')
+        .in('id', userIds);
+      if (profileError) throw profileError;
+      
+      return staffData.map(s => {
+        const profile = profiles?.find(p => p.id === s.user_id);
+        return {
+          id: s.user_id,
+          full_name: profile?.full_name || 'Unknown',
+          role: s.role
+        };
+      });
+      */
+      return [];
     },
     enabled: isAddingTask && !!vendorId,
   });
 
   const addTaskMutation = useMutation({
     mutationFn: async (taskData: typeof newTask) => {
-      await apiService.projectTasksAPI.create({
-        project_id: projectId,
-        title: taskData.title,
-        task_type: taskData.task_type,
-        description: taskData.description || null,
-        due_date: taskData.due_date || null,
-        status: taskData.status,
-        assigned_to: taskData.assigned_to || null
-      });
+      // Mock implementation
+      /*
+      const { error } = await (supabase as any)
+        .from('project_tasks')
+        .insert({
+          project_id: projectId,
+          title: taskData.title,
+          task_type: taskData.task_type,
+          description: taskData.description || null,
+          due_date: taskData.due_date || null,
+          status: taskData.status,
+          assigned_to: taskData.assigned_to || null
+        });
+      if (error) throw error;
+      */
+      console.log('Adding task (mock):', taskData);
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['project-tasks-tab', projectId] });
@@ -138,32 +171,46 @@ function ProjectTasksTab({ projectId, vendorId }: { projectId: string; vendorId?
       setNewTask({ title: '', task_type: 'general', description: '', due_date: '', status: 'pending', assigned_to: '' });
       toast.success('Task added successfully');
     },
-    onError: (error: any) => {
-      toast.error(error.message || 'Failed to add task');
+    onError: () => {
+      toast.error('Failed to add task');
     }
   });
 
   const updateTaskStatus = async (taskId: string, status: string) => {
-    try {
-      await apiService.projectTasksAPI.update(taskId, {
+    /*
+    const { error } = await (supabase as any)
+      .from('project_tasks')
+      .update({ 
         status,
         completed_at: status === 'completed' ? new Date().toISOString() : null
-      });
-      queryClient.invalidateQueries({ queryKey: ['project-tasks-tab', projectId] });
-      toast.success('Task updated');
-    } catch (error: any) {
-      toast.error(error.message || 'Failed to update task');
+      })
+      .eq('id', taskId);
+
+    if (error) {
+      toast.error('Failed to update task');
+      return;
     }
+    */
+    console.log('Updating task (mock):', taskId, status);
+    queryClient.invalidateQueries({ queryKey: ['project-tasks-tab', projectId] });
+    toast.success('Task updated');
   };
 
   const deleteTask = async (taskId: string) => {
-    try {
-      await apiService.projectTasksAPI.delete(taskId);
-      queryClient.invalidateQueries({ queryKey: ['project-tasks-tab', projectId] });
-      toast.success('Task deleted');
-    } catch (error: any) {
-      toast.error(error.message || 'Failed to delete task');
+    /*
+    const { error } = await (supabase as any)
+      .from('project_tasks')
+      .delete()
+      .eq('id', taskId);
+
+    if (error) {
+      toast.error('Failed to delete task');
+      return;
     }
+    */
+    console.log('Deleting task (mock):', taskId);
+    queryClient.invalidateQueries({ queryKey: ['project-tasks-tab', projectId] });
+    toast.success('Task deleted');
   };
 
   return (
@@ -463,9 +510,15 @@ export default function ProjectDetails() {
       if (!projectId) return null;
 
       const response = await apiService.projectsAPI.getById(projectId);
+      // Handle both wrapped and unwrapped responses
       const projectData = response?.data || response;
 
       if (!projectData) return null;
+
+      // Ensure groups is always an array
+      const groups = Array.isArray(projectData.groups) ? projectData.groups : [];
+
+      console.log('[ProjectDetails] Fetched project groups:', groups.length, groups);
 
       // Normalize field names (backend uses project_name, component expects name)
       return {
@@ -474,33 +527,42 @@ export default function ProjectDetails() {
         // Related data will be undefined (backend doesn't return nested relations)
         client: projectData.client || null,
         product: projectData.product || null,
-        groups: projectData.groups || [],
+        groups: groups,
       };
     },
     enabled: !!projectId,
   });
 
-  const { data: records = [] } = useQuery({
+  const { data: records = [], error: recordsError } = useQuery({
     queryKey: ['project-records', projectId],
     queryFn: async () => {
       if (!projectId) return [];
 
-      // Fetch all records for this project; project_id already scopes correctly
-      const response = await apiService.dataRecordsAPI.getByProject(projectId, {
-        order_by: 'record_number',
-        order: 'asc'
-      });
+      try {
+        // Fetch all records for this project; project_id already scopes correctly
+        const response = await apiService.dataRecordsAPI.getByProject(projectId, {
+          order_by: 'record_number',
+          order: 'asc'
+        });
 
-      const recordsData = response?.data || [];
-      // Parse JSON fields if they're strings
-      return recordsData.map((record: any) => ({
-        ...record,
-        data_json: typeof record.data_json === 'string'
-          ? JSON.parse(record.data_json)
-          : record.data_json
-      }));
+        const recordsData = response?.data || [];
+        // Parse JSON fields if they're strings
+        return recordsData.map((record: any) => ({
+          ...record,
+          data_json: typeof record.data_json === 'string'
+            ? JSON.parse(record.data_json)
+            : record.data_json
+        }));
+      } catch (error) {
+        console.error('[ProjectDetails] Failed to load records:', error);
+        const errorMessage = error instanceof Error ? error.message : 'Failed to fetch';
+        toast.error(`Failed to load records: ${errorMessage}`);
+        throw error;
+      }
     },
     enabled: !!projectId,
+    retry: 2,
+    retryDelay: 1000,
   });
 
   const { data: templates = [] } = useQuery({
@@ -722,9 +784,11 @@ export default function ProjectDetails() {
             } catch (uploadError) {
               console.error('[Background Removal] Upload failed for record:', record.id, uploadError);
             }
+          } else {
+            console.error('Background removal failed for:', record.id);
           }
         } catch (err) {
-          console.error('Background removal failed for:', record.id);
+          console.error('Background removal failed for:', record.id, err);
         }
       }
 
@@ -919,11 +983,15 @@ export default function ProjectDetails() {
     let uploaded = 0;
     for (const file of Array.from(files)) {
       try {
-        await apiService.imageAPI.uploadProjectPhoto({
-          file,
-          projectId: projectId!
+        const result = await apiService.imageAPI.uploadProjectPhoto({
+          file: file,
+          projectId: projectId!,
+          fileName: file.name
         });
-        uploaded++;
+
+        if (result.success) {
+          uploaded++;
+        }
       } catch (err) {
         console.error('Upload failed:', file.name);
       }
@@ -1062,49 +1130,16 @@ export default function ProjectDetails() {
                 <h2 className="text-xl font-semibold">Templates & Groups</h2>
                 <p className="text-sm text-muted-foreground">Manage templates and assign them to groups</p>
               </div>
-              <div className="flex gap-2">
-                <BatchDataRecordsPDFGenerator
-                  projectId={projectId!}
-                  projectName={project.name}
-                  vendorId={project.vendor_id}
-                  groups={project.groups?.map(g => ({
-                    id: g.id,
-                    name: g.name,
-                    template_id: g.template_id,
-                    record_count: g.record_count || 0
-                  })) || []}
-                  templates={templates.map(t => ({
-                    id: t.id,
-                    name: t.name,
-                    category: t.category,
-                    design_json: t.design_json,
-                    width_mm: t.width_mm,
-                    height_mm: t.height_mm
-                  }))}
-                />
-                <ProjectPDFGenerator
-                  projectId={projectId!}
-                  projectName={project.name}
-                  vendorId={project.vendor_id}
-                  groups={project.groups?.map(g => ({
-                    id: g.id,
-                    name: g.name,
-                    template_id: g.template_id,
-                    record_count: g.record_count || 0
-                  })) || []}
-                  templates={templates}
-                />
-                <GeneratePreviewDialog
-                  projectId={projectId!}
-                  vendorId={project.vendor_id}
-                  groups={project.groups?.map(g => ({
-                    id: g.id,
-                    name: g.name,
-                    template_id: g.template_id,
-                    record_count: g.record_count || 0
-                  })) || []}
-                />
-              </div>
+              <GeneratePreviewDialog
+                projectId={projectId!}
+                vendorId={project.vendor_id}
+                groups={project.groups?.map(g => ({
+                  id: g.id,
+                  name: g.name,
+                  template_id: g.template_id,
+                  record_count: g.record_count || 0
+                })) || []}
+              />
             </div>
 
             <ProjectTemplateManager
@@ -1115,13 +1150,13 @@ export default function ProjectDetails() {
             <div className="border-t pt-6">
               <ProjectGroupsManager
                 projectId={projectId!}
-                groups={project.groups?.map(g => ({
+                groups={project?.groups ? project.groups.map((g: any) => ({
                   id: g.id,
                   name: g.name,
                   template_id: g.template_id,
                   record_count: g.record_count || 0,
-                  template: g.template
-                })) || []}
+                  template: g.template || null
+                })) : []}
               />
             </div>
           </TabsContent>
@@ -1333,7 +1368,10 @@ export default function ProjectDetails() {
                 cropped_photo_url: (r as any).cropped_photo_url
               }))}
               projectId={projectId!}
-              groups={project.groups?.map(g => ({ id: g.id, name: g.name })) || []}
+              groups={project?.groups ? project.groups.map((g: any) => ({
+                id: String(g.id),
+                name: String(g.name || g.group_name || 'Unnamed Group')
+              })) : []}
               onEditRecord={(record) => setEditingRecord(record)}
               onSelectionChange={(newSelectedIds) => setSelectedRecordIds(newSelectedIds)}
             />

@@ -3,15 +3,7 @@
  * Replaces Supabase calls with backend REST API
  */
 
-// Dynamically set API URL based on environment
-const API_URL = import.meta.env.VITE_API_URL || (() => {
-  // If in development and localhost, use localhost:3001
-  if (typeof window !== 'undefined' && window.location.hostname === 'localhost') {
-    return 'http://localhost:3001/api';
-  }
-  // Otherwise use relative path (works for same-domain or proxy)
-  return '/api';
-})();
+const API_URL = 'http://localhost:3001/api';
 
 // ============================================================================
 // CLIENTS API

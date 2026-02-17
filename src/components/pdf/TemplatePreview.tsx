@@ -15,10 +15,10 @@ function parseColor(fill: any): string {
   if (typeof fill === 'string') return fill;
   if (fill.type === 'linear' || fill.type === 'radial') {
     // Handle gradients
-    const stops = fill.colorStops?.map((stop: any) => 
+    const stops = fill.colorStops?.map((stop: any) =>
       `${stop.color} ${(stop.offset * 100).toFixed(0)}%`
     ).join(', ');
-    return fill.type === 'linear' 
+    return fill.type === 'linear'
       ? `linear-gradient(${fill.coords?.x2 === 1 ? '90deg' : '180deg'}, ${stops})`
       : `radial-gradient(circle, ${stops})`;
   }
@@ -31,10 +31,10 @@ function replaceVariables(text: string, dataJson: any, record: any): string {
   return text.replace(/\{\{(.+?)\}\}/g, (_match, fieldName) => {
     const field = fieldName.trim();
     // Check various sources for the value
-    const value = dataJson?.[field] || 
-                  record?.[field] || 
-                  record?.data_json?.[field] ||
-                  `{{${field}}}`;
+    const value = dataJson?.[field] ||
+      record?.[field] ||
+      record?.data_json?.[field] ||
+      `{{${field}}}`;
     return value;
   });
 }
@@ -42,25 +42,30 @@ function replaceVariables(text: string, dataJson: any, record: any): string {
 // Helper to convert filename to Supabase Storage public URL
 function resolvePhotoUrl(photoValue: string | null | undefined, projectId?: string, recordId?: string): string | null {
   if (!photoValue) return null;
-  
+
   // Already a full URL or data URI
   if (photoValue.startsWith('http://') || photoValue.startsWith('https://') || photoValue.startsWith('data:')) {
     return photoValue;
   }
-  
+
   // Use backend endpoint if we have recordId
   if (recordId) {
     return `http://localhost:3001/api/image/get-photo/${recordId}?type=cropped`;
   }
-  
+
   // Fallback: It's a filename - construct Supabase Storage URL
+  // Fallback: It's a filename - construct Supabase Storage URL
+  // Note: Supabase is currently disconnected/not configured in this context.
+  // If you need to resolve these URLs, you should use the backend API or configure Supabase client.
   if (projectId) {
-    const { data: { publicUrl } } = supabase.storage
-      .from('project-photos')
-      .getPublicUrl(`${projectId}/${photoValue}`);
-    return publicUrl;
+    // TODO: Implement proper URL resolution without direct Supabase client dependency if needed
+    // const { data: { publicUrl } } = supabase.storage
+    //   .from('project-photos')
+    //   .getPublicUrl(`${projectId}/${photoValue}`);
+    // return publicUrl;
+    return `https://placehold.co/100x100?text=${photoValue}`; // Placeholder for now to avoid crash
   }
-  
+
   return null;
 }
 
@@ -68,7 +73,7 @@ export function TemplatePreview({ templateData, sampleRecord, scale = 1, project
   const designJson = templateData?.design_json;
   const canvasWidth = designJson?.canvasWidth || templateData?.canvas_width || 340;
   const canvasHeight = designJson?.canvasHeight || templateData?.canvas_height || 214;
-  
+
   const dataJson = sampleRecord?.data_json || sampleRecord || {};
 
   const renderedObjects = useMemo(() => {
@@ -96,7 +101,7 @@ export function TemplatePreview({ templateData, sampleRecord, scale = 1, project
       if (objType === 'textbox' || objType === 'i-text' || objType === 'text') {
         const text = replaceVariables(obj.text || '', dataJson, sampleRecord);
         const fontSize = (obj.fontSize || 12) * scaleY;
-        
+
         return (
           <div
             key={index}
@@ -122,22 +127,22 @@ export function TemplatePreview({ templateData, sampleRecord, scale = 1, project
       // Handle rectangles (including photo placeholders)
       if (objType === 'rect') {
         // Check for photo placeholder - supports both old (isVariableField) and new (data.isPhoto) formats
-        const isPhotoPlaceholder = 
-          (obj.isVariableField && obj.variableType === 'photo') || 
+        const isPhotoPlaceholder =
+          (obj.isVariableField && obj.variableType === 'photo') ||
           obj.data?.isPhoto === true;
-        
+
         if (isPhotoPlaceholder) {
           // Check multiple sources for photo URL - record level first, then data_json
-          const rawPhotoUrl = sampleRecord?.cropped_photo_url || 
-                          sampleRecord?.photo_url || 
-                          dataJson?.photo_url || 
-                          dataJson?.photo ||
-                          dataJson?.profilePic;
-          
+          const rawPhotoUrl = sampleRecord?.cropped_photo_url ||
+            sampleRecord?.photo_url ||
+            dataJson?.photo_url ||
+            dataJson?.photo ||
+            dataJson?.profilePic;
+
           // Resolve to full URL if it's just a filename
           const photoUrl = resolvePhotoUrl(rawPhotoUrl, projectId, sampleRecord?.id);
           const isValidUrl = !!photoUrl;
-          
+
           return (
             <div
               key={index}
@@ -155,9 +160,9 @@ export function TemplatePreview({ templateData, sampleRecord, scale = 1, project
               }}
             >
               {isValidUrl ? (
-                <img 
-                  src={photoUrl} 
-                  alt="Photo" 
+                <img
+                  src={photoUrl}
+                  alt="Photo"
                   style={{ width: '100%', height: '100%', objectFit: 'cover' }}
                 />
               ) : (
@@ -205,19 +210,19 @@ export function TemplatePreview({ templateData, sampleRecord, scale = 1, project
       if (objType === 'circle' || objType === 'ellipse') {
         const rx = (obj.rx || obj.radius || 50) * scaleX;
         const ry = (obj.ry || obj.radius || 50) * scaleY;
-        
+
         // Check for photo placeholder
         const isPhotoPlaceholder = obj.data?.isPhoto === true;
-        
+
         if (isPhotoPlaceholder) {
-          const rawPhotoUrl = sampleRecord?.cropped_photo_url || 
-                          sampleRecord?.photo_url || 
-                          dataJson?.photo_url || 
-                          dataJson?.photo ||
-                          dataJson?.profilePic;
+          const rawPhotoUrl = sampleRecord?.cropped_photo_url ||
+            sampleRecord?.photo_url ||
+            dataJson?.photo_url ||
+            dataJson?.photo ||
+            dataJson?.profilePic;
           const photoUrl = resolvePhotoUrl(rawPhotoUrl, projectId);
           const isValidUrl = !!photoUrl;
-          
+
           return (
             <div
               key={index}
@@ -235,9 +240,9 @@ export function TemplatePreview({ templateData, sampleRecord, scale = 1, project
               }}
             >
               {isValidUrl ? (
-                <img 
-                  src={photoUrl} 
-                  alt="Photo" 
+                <img
+                  src={photoUrl}
+                  alt="Photo"
                   style={{ width: '100%', height: '100%', objectFit: 'cover' }}
                 />
               ) : (
@@ -246,7 +251,7 @@ export function TemplatePreview({ templateData, sampleRecord, scale = 1, project
             </div>
           );
         }
-        
+
         return (
           <div
             key={index}
@@ -266,16 +271,16 @@ export function TemplatePreview({ templateData, sampleRecord, scale = 1, project
       // Handle polygons (hexagon, star, pentagon, etc.)
       if (objType === 'polygon') {
         const isPhotoPlaceholder = obj.data?.isPhoto === true;
-        
+
         if (isPhotoPlaceholder) {
-          const rawPhotoUrl = sampleRecord?.cropped_photo_url || 
-                          sampleRecord?.photo_url || 
-                          dataJson?.photo_url || 
-                          dataJson?.photo ||
-                          dataJson?.profilePic;
+          const rawPhotoUrl = sampleRecord?.cropped_photo_url ||
+            sampleRecord?.photo_url ||
+            dataJson?.photo_url ||
+            dataJson?.photo ||
+            dataJson?.profilePic;
           const photoUrl = resolvePhotoUrl(rawPhotoUrl, projectId);
           const isValidUrl = !!photoUrl;
-          
+
           return (
             <div
               key={index}
@@ -292,9 +297,9 @@ export function TemplatePreview({ templateData, sampleRecord, scale = 1, project
               }}
             >
               {isValidUrl ? (
-                <img 
-                  src={photoUrl} 
-                  alt="Photo" 
+                <img
+                  src={photoUrl}
+                  alt="Photo"
                   style={{ width: '100%', height: '100%', objectFit: 'cover' }}
                 />
               ) : (
@@ -303,7 +308,7 @@ export function TemplatePreview({ templateData, sampleRecord, scale = 1, project
             </div>
           );
         }
-        
+
         return (
           <div
             key={index}
@@ -327,7 +332,7 @@ export function TemplatePreview({ templateData, sampleRecord, scale = 1, project
         const y2 = obj.y2 || 0;
         const length = Math.sqrt(Math.pow(x2 - x1, 2) + Math.pow(y2 - y1, 2)) * scale;
         const lineAngle = Math.atan2(y2 - y1, x2 - x1) * (180 / Math.PI);
-        
+
         return (
           <div
             key={index}

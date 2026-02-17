@@ -110,11 +110,21 @@ jobs:
         git fetch origin
         git reset --hard origin/${{ github.ref_name }}
         
+        # Create .env file for Docker Compose interpolation and container envs
+        cat > .env << EOF
+        NODE_ENV=${{ env.DEPLOY_ENV }}
+        PORT=${{ secrets.BACKEND_PORT || '3001' }}
+        DATABASE_URL=${{ secrets.DATABASE_URL }}
+        REDIS_URL=${{ secrets.REDIS_URL || 'redis://localhost:6379' }}
+        SUPABASE_URL=${{ secrets.SUPABASE_URL }}
+        SUPABASE_KEY=${{ secrets.SUPABASE_KEY }}
+        JWT_SECRET=${{ secrets.JWT_SECRET }}
+        IMAGE_REPO=${{ github.repository }}
+        IMAGE_TAG=${{ github.sha }}
+        EOF
+        
         # Pull latest Docker images
         docker pull ghcr.io/${{ github.repository }}:${{ github.sha }}
-        
-        # Update docker-compose with new image tag
-        sed -i 's|image: ghcr.io/${{ github.repository }}:.*|image: ghcr.io/${{ github.repository }}:${{ github.sha }}|g' docker-compose.yml
         
         # Stop and remove old containers
         docker-compose down
