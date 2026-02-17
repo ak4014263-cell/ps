@@ -17,7 +17,16 @@ interface Session {
   expiresAt?: string;
 }
 
-const API_URL = 'http://localhost:3001/api/auth';
+// Dynamically set API URL based on environment
+const API_URL = (() => {
+  const baseUrl = import.meta.env.VITE_API_URL || (() => {
+    if (typeof window !== 'undefined' && window.location.hostname === 'localhost') {
+      return 'http://localhost:3001/api';
+    }
+    return '/api';
+  })();
+  return `${baseUrl}/auth`;
+})();
 
 export const useAuth = () => {
   const [user, setUser] = useState<User | null>(null);
