@@ -171,10 +171,8 @@ setupRateLimiters(app);
 
 
 // Serve uploaded files (project photos) from the uploads folder
-
 // Place files under <repo_root>/backend/uploads/project-photos/{projectId}/{filename}
-
-app.use('/uploads', express.static(path.join(__dirname, './uploads')));
+app.use('/uploads', cors(), express.static(path.join(__dirname, './uploads')));
 
 
 
@@ -250,6 +248,23 @@ app.use('/api/project-files', projectFilesRoutes);
 // Batch processing routes (production queue-based)
 
 app.use('/api/batch', batchProcessingRoutes);
+
+// ============================================================================
+// FRONTEND STATIC FILES (SPA)
+// ============================================================================
+// Serve frontend dist files
+const distPath = path.join(__dirname, '../dist');
+app.use(express.static(distPath));
+
+// SPA fallback - serve index.html for all non-API routes
+app.get('*', (req, res) => {
+  const indexPath = path.join(distPath, 'index.html');
+  res.sendFile(indexPath, (err) => {
+    if (err) {
+      res.status(404).json({ error: 'Not Found' });
+    }
+  });
+});
 
 
 
